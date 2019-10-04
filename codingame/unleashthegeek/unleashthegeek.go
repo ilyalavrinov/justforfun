@@ -160,12 +160,13 @@ func (stg *scanningStrategy) newTask(s *state, myRobot entity, xy coord, prevTas
 			yToCheck = append(yToCheck, xy.y-inc)
 		}
 		if xy.y+inc < s.height {
-			yToCheck = append(yToCheck, xy.y-inc)
+			yToCheck = append(yToCheck, xy.y+inc)
 		}
 		inc++
 	}
 	var task *scanningTask
 	for _, y := range yToCheck {
+		log("check Y: ", y)
 		if _, found := stg.visitedY[y]; !found {
 			task = &scanningTask{
 				y:    y,
@@ -176,6 +177,7 @@ func (stg *scanningStrategy) newTask(s *state, myRobot entity, xy coord, prevTas
 			break
 		}
 	}
+	log("new task: ", task)
 	return task
 }
 
