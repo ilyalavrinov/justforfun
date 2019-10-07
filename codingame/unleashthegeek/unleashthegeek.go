@@ -75,59 +75,61 @@ type strategy interface {
 }
 
 type scanningTask struct {
-	y           int
-	toHQ        bool
-	rowFinished bool
+	path []coord
 }
 
 type scanningStrategy struct {
-	visitedY      map[int]struct{}
+	visitedCoord  map[int]struct{}
 	assignedTasks map[string]*scanningTask
+	scanModeCol   bool
+	scanStart     int
 }
 
 func newScanningStrategy() *scanningStrategy {
 	stg := &scanningStrategy{
-		visitedY:      make(map[int]struct{}),
+		visitedCoord:  make(map[int]struct{}),
 		assignedTasks: make(map[string]*scanningTask),
 	}
+	stg.scanModeCol = true
+	stg.scanStart = 25
 	return stg
 }
 
 func (stg *scanningStrategy) turn(s *state) {
 	log("len entities ", len(s.entities))
 	for _, e := range s.entities {
-		log("ET ", e.what, " id ", e.id)
+		log("ET ", e.what, " id ", e.id, " xy ", e.xy)
 		if e.what != TYPEMYROBOT {
 			continue
 		}
 		xy := e.xy
+		if e.carry == CARRYORE {
+			log("carry ore, fallback")
+			cmdMove(0, xy.y)
+			continue
+		}
 		task, found := stg.assignedTasks[e.id]
 		if !found {
 			log("need new task")
 			task = stg.newTask(s, e, xy, nil)
 		}
-		if task.toHQ {
-			log("toHQ!")
-			if xy.x == 0 {
-				task.toHQ = false
-				if task.rowFinished {
-					log("row finished; need new task")
-					task = stg.newTask(s, e, xy, task)
-				}
-			} else {
-				cmdMove(0, xy.y)
+		if len(task.path) == 0 && s.field[xy].hole == true {
+			task = stg.newTask(s, e, xy, task)
+		}
+		if len(task.path) > 0 {
+			next := task.path[0]
+			if xy != next {
+				log("moving")
+				cmdMove(next.x, next.y)
 				continue
+			} else {
+				log("at location, modifying path")
+				if len(task.path) > 1 {
+					task.path = task.path[1:]
+				} else {
+					task.path = []coord{}
+				}
 			}
-		}
-		if xy.y != task.y {
-			log("change y")
-			cmdMove(xy.x, task.y)
-			continue
-		}
-		if e.carry == CARRYORE {
-			log("carry ore, fallback")
-			cmdMove(0, xy.y)
-			continue
 		}
 		c := s.field[xy]
 		if c.ore > 0 {
@@ -140,39 +142,50 @@ func (stg *scanningStrategy) turn(s *state) {
 			cmdDig(xy)
 			continue
 		}
-		if xy.x == s.width-1 {
-			log("row finished, back to HQ")
-			task.toHQ = true
-			task.rowFinished = true
-			cmdMove(0, xy.y)
-			continue
-		}
-		log("next step")
-		cmdMove(xy.x+1, xy.y)
+		cmdWait()
 	}
 }
 
 func (stg *scanningStrategy) newTask(s *state, myRobot entity, xy coord, prevTask *scanningTask) *scanningTask {
-	yToCheck := []int{xy.y}
+	coordBegin := stg.scanStart
+
+	coordStart := 1 // no HQ
+	coordStop := s.height
+	otherCoordStop := s.width
+	coordToCheck := []int{coordBegin}
+	if stg.scanModeCol {
+		coordStart = 0
+		coordStop = s.width
+		otherCoordStop = s.height
+	}
 	inc := 1
-	for xy.y-inc >= 0 || xy.y+inc < s.height {
-		if xy.y-inc >= 0 {
-			yToCheck = append(yToCheck, xy.y-inc)
+	for coordBegin-inc >= coordStart || coordBegin+inc < coordStop {
+		if coordBegin-inc >= coordStart {
+			coordToCheck = append(coordToCheck, coordBegin-inc)
 		}
-		if xy.y+inc < s.height {
-			yToCheck = append(yToCheck, xy.y+inc)
+		if coordBegin+inc < coordStop {
+			coordToCheck = append(coordToCheck, coordBegin+inc)
 		}
 		inc++
 	}
+
 	var task *scanningTask
-	for _, y := range yToCheck {
-		log("check Y: ", y)
-		if _, found := stg.visitedY[y]; !found {
-			task = &scanningTask{
-				y:    y,
-				toHQ: true,
+	for _, c := range coordToCheck {
+		log("check coord: ", c, " ; mode: ", stg.scanModeCol)
+		if _, found := stg.visitedCoord[c]; !found {
+			path := make([]coord, 0, otherCoordStop)
+			for i := coordStart; i < otherCoordStop; i++ {
+				if stg.scanModeCol {
+					path = append(path, coord{c, i})
+				} else {
+					path = append(path, coord{i, c})
+				}
 			}
-			stg.visitedY[y] = struct{}{}
+			log("path ", path)
+			task = &scanningTask{
+				path: path,
+			}
+			stg.visitedCoord[c] = struct{}{}
 			stg.assignedTasks[myRobot.id] = task
 			break
 		}
