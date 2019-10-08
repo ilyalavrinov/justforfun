@@ -1,13 +1,22 @@
 package main
 
-import "fmt"
-import "os"
-import "bufio"
-import "strings"
-import "strconv"
+import (
+	"bufio"
+	"fmt"
+	"math/rand"
+	"os"
+	"sort"
+	"strconv"
+	"strings"
+)
 
 type item string
 type command string
+
+var (
+	H int = 15
+	W int = 30
+)
 
 const (
 	RADAR item = "RADAR"
@@ -33,20 +42,20 @@ const (
 	CARRYORE     = 4
 )
 
-func cmdRequest(i item) {
-	fmt.Printf("%s %s\n", REQUEST, i)
+func cmdRequest(i item) string {
+	return fmt.Sprintf("%s %s\n", REQUEST, i)
 }
 
-func cmdMove(x, y int) {
-	fmt.Printf("%s %d %d\n", MOVE, x, y)
+func cmdMove(x, y int) string {
+	return fmt.Sprintf("%s %d %d\n", MOVE, x, y)
 }
 
-func cmdDig(xy coord) {
-	fmt.Printf("%s %d %d\n", DIG, xy.x, xy.y)
+func cmdDig(x, y int) string {
+	return fmt.Sprintf("%s %d %d\n", DIG, x, y)
 }
 
-func cmdWait() {
-	fmt.Println(WAIT)
+func cmdWait() string {
+	return fmt.Sprintln(WAIT)
 }
 
 func log(args ...interface{}) {
@@ -70,131 +79,240 @@ type entity struct {
 	xy    coord
 }
 
-type strategy interface {
-	turn(*state)
+type squad struct {
+	radarman string
+	trapman  string
+	other    []string
+	all      []string
+
+	target coord
 }
 
-type scanningTask struct {
-	path []coord
-}
-
-type scanningStrategy struct {
-	visitedCoord  map[int]struct{}
-	assignedTasks map[string]*scanningTask
-	scanModeCol   bool
-	scanStart     int
-}
-
-func newScanningStrategy() *scanningStrategy {
-	stg := &scanningStrategy{
-		visitedCoord:  make(map[int]struct{}),
-		assignedTasks: make(map[string]*scanningTask),
+func merge(a, b map[string]string) map[string]string {
+	res := make(map[string]string, len(a)+len(b))
+	for k, v := range a {
+		res[k] = v
 	}
-	stg.scanModeCol = true
-	stg.scanStart = 25
-	return stg
+	for k, v := range b {
+		res[k] = v
+	}
+	return res
 }
 
-func (stg *scanningStrategy) turn(s *state) {
-	log("len entities ", len(s.entities))
-	for _, e := range s.entities {
-		log("ET ", e.what, " id ", e.id, " xy ", e.xy)
-		if e.what != TYPEMYROBOT {
-			continue
+func doCommand(orders map[string]string) {
+	keys := make([]string, len(orders))
+	for k := range orders {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		fmt.Println(orders[k])
+	}
+}
+
+func (sq squad) allInHQ(s *state) bool {
+	for _, a := range sq.all {
+		if s.entities[a].xy.x != 0 {
+			return false
 		}
-		xy := e.xy
-		if e.carry == CARRYORE {
-			log("carry ore, fallback")
-			cmdMove(0, xy.y)
-			continue
+	}
+	return true
+}
+
+func (sq squad) isInSquad(id string) bool {
+	if sq.radarman == id {
+		return true
+	}
+	if sq.trapman == id {
+		return true
+	}
+	for _, i := range sq.other {
+		if i == id {
+			return true
 		}
-		task, found := stg.assignedTasks[e.id]
-		if !found {
-			log("need new task")
-			task = stg.newTask(s, e, xy, nil)
+	}
+	return false
+}
+
+func (sq squad) carryOre(s *state) bool {
+	for _, a := range sq.all {
+		if s.entities[a].carry == CARRYORE {
+			return true
 		}
-		if len(task.path) == 0 && s.field[xy].hole == true {
-			task = stg.newTask(s, e, xy, task)
+	}
+	return false
+}
+
+func (sq squad) chooseRadarLocation(s *state) {
+	sq.target = coord{rand.Intn(W + 1), rand.Intn(H + 1)}
+}
+
+func (sq squad) turn(s *state) map[string]string {
+	orders := make(map[string]string, len(sq.all))
+	if sq.carryOre(s) {
+		for _, a := range sq.all {
+			orders[a] = cmdMove(0, sq.target.y)
 		}
-		if len(task.path) > 0 {
-			next := task.path[0]
-			if xy != next {
-				log("moving")
-				cmdMove(next.x, next.y)
-				continue
+	} else if sq.allInHQ(s) {
+		if s.entities[sq.radarman].carry == CARRYRADAR {
+			sq.chooseRadarLocation(s)
+			for _, a := range sq.all {
+				orders[a] = cmdMove(sq.target.x, sq.target.y)
+			}
+		} else if s.radarCooldown != 0 || s.trapCooldown != 0 {
+			for _, a := range sq.all {
+				orders[a] = cmdWait()
+			}
+		} else {
+			orders[sq.radarman] = cmdRequest(RADAR)
+			orders[sq.trapman] = cmdRequest(TRAP)
+			for _, o := range sq.other {
+				orders[o] = cmdWait()
+			}
+		}
+	} else {
+		// in the field and not returning ore
+		if s.entities[sq.radarman].carry == CARRYRADAR {
+			// moving to target
+			if isNeighbour(s.entities[sq.radarman].xy, sq.target) {
+				orders[sq.radarman] = cmdDig(sq.target.x, sq.target.y)
+				orders[sq.trapman] = cmdWait()
+				for _, o := range sq.other {
+					orders[o] = cmdWait()
+				}
 			} else {
-				log("at location, modifying path")
-				if len(task.path) > 1 {
-					task.path = task.path[1:]
-				} else {
-					task.path = []coord{}
+				for _, a := range sq.all {
+					orders[a] = cmdMove(sq.target.x, sq.target.y)
+				}
+			}
+		} else {
+			for _, a := range sq.all {
+				xy := s.entities[a].xy
+				ns := neighbours(xy)
+				for _, n := range ns {
+					if s.ores[n] > 0 {
+						orders[a] = cmdDig(n.x, n.y)
+						break
+					}
+				}
+				if _, found := orders[a]; !found {
+					orders[a] = cmdWait()
 				}
 			}
 		}
-		c := s.field[xy]
-		if c.ore > 0 {
-			log("digging ore")
-			cmdDig(xy)
-			continue
+
+	}
+	return orders
+}
+
+func isNeighbour(a, b coord) bool {
+	if a.x == b.x {
+		if a.y == b.y+1 || a.y == b.y-1 {
+			return true
 		}
-		if !c.hole && xy.x != 0 {
-			log("digging test hole")
-			cmdDig(xy)
-			continue
+	}
+	if a.y == b.y {
+		if a.x == b.x+1 || a.x == b.x-1 {
+			return true
 		}
-		cmdWait()
+	}
+	return false
+}
+
+func neighbours(xy coord) []coord {
+	res := make([]coord, 0, 4)
+	if xy.x-1 >= 0 {
+		res = append(res, coord{xy.x - 1, xy.y})
+	}
+	if xy.x+1 < W {
+		res = append(res, coord{xy.x + 1, xy.y})
+	}
+	if xy.y-1 >= 0 {
+		res = append(res, coord{xy.x, xy.y - 1})
+	}
+	if xy.y+1 < H {
+		res = append(res, coord{xy.x, xy.y + 1})
+	}
+	return res
+}
+
+type squadsStragery struct {
+	squads []squad
+	free   []string
+}
+
+func newSquadStrategy() *squadsStragery {
+	s := &squadsStragery{
+		squads: make([]squad, 0, 5),
+		free:   make([]string, 0, 5),
+	}
+	return s
+}
+
+func (stg *squadsStragery) turn(s *state) {
+	stg.updateFree(s)
+	if len(stg.free) > 0 {
+		stg.rebuildSquads()
+	}
+	var orders map[string]string
+	for _, sq := range stg.squads {
+		o := sq.turn(s)
+		orders = merge(orders, o)
+	}
+	doCommand(orders)
+}
+
+func (stg *squadsStragery) updateFree(s *state) {
+	stg.free = make([]string, 0, len(s.myRobots))
+	for _, e := range s.myRobots {
+		seen := false
+		for _, sq := range stg.squads {
+			seen = seen || sq.isInSquad(e.id)
+		}
+		if !seen {
+			stg.free = append(stg.free, e.id)
+		}
 	}
 }
 
-func (stg *scanningStrategy) newTask(s *state, myRobot entity, xy coord, prevTask *scanningTask) *scanningTask {
-	coordBegin := stg.scanStart
-
-	coordStart := 1 // no HQ
-	coordStop := s.height
-	otherCoordStop := s.width
-	coordToCheck := []int{coordBegin}
-	if stg.scanModeCol {
-		coordStart = 0
-		coordStop = s.width
-		otherCoordStop = s.height
-	}
-	inc := 1
-	for coordBegin-inc >= coordStart || coordBegin+inc < coordStop {
-		if coordBegin-inc >= coordStart {
-			coordToCheck = append(coordToCheck, coordBegin-inc)
+func (stg *squadsStragery) rebuildSquads() {
+	if len(stg.free) >= 4 {
+		stg.squads = make([]squad, 0, 2)
+		if len(stg.free) == 4 {
+			stg.squads = append(stg.squads, squad{
+				radarman: stg.free[0],
+				trapman:  stg.free[1],
+			})
+			stg.squads = append(stg.squads, squad{
+				radarman: stg.free[2],
+				trapman:  stg.free[3],
+			})
+		} else {
+			stg.squads = append(stg.squads, squad{
+				radarman: stg.free[0],
+				trapman:  stg.free[1],
+				other:    []string{stg.free[2]},
+			})
+			stg.squads = append(stg.squads, squad{
+				radarman: stg.free[3],
+				trapman:  stg.free[4],
+			})
 		}
-		if coordBegin+inc < coordStop {
-			coordToCheck = append(coordToCheck, coordBegin+inc)
+	} else {
+		stg.squads = make([]squad, 0, 1)
+		sq := squad{
+			radarman: stg.free[0],
 		}
-		inc++
-	}
-
-	var task *scanningTask
-	for _, c := range coordToCheck {
-		log("check coord: ", c, " ; mode: ", stg.scanModeCol)
-		if _, found := stg.visitedCoord[c]; !found {
-			path := make([]coord, 0, otherCoordStop)
-			for i := coordStart; i < otherCoordStop; i++ {
-				if stg.scanModeCol {
-					path = append(path, coord{c, i})
-				} else {
-					path = append(path, coord{i, c})
-				}
-			}
-			log("path ", path)
-			task = &scanningTask{
-				path: path,
-			}
-			stg.visitedCoord[c] = struct{}{}
-			stg.assignedTasks[myRobot.id] = task
-			break
+		if len(stg.free) >= 2 {
+			sq.trapman = stg.free[1]
 		}
+		if len(stg.free) == 3 {
+			sq.other = []string{stg.free[2]}
+		}
+		stg.squads = []squad{sq}
 	}
-	log("new task: ", task)
-	return task
+	stg.free = make([]string, 0)
 }
-
-var _ strategy = (*scanningStrategy)(nil)
 
 type state struct {
 	width, height int
@@ -202,21 +320,23 @@ type state struct {
 	myScore, enemyScore int
 
 	field    map[coord]cell
-	entities []entity
+	entities map[string]entity
+
+	myRobots    []entity
+	enemyRobots []entity
+
+	ores map[coord]int
 
 	radarCooldown, trapCooldown int
 
 	step int
-	stg  strategy
+	stg  *squadsStragery
 
 	scanner *bufio.Scanner
 }
 
 func newState() *state {
 	s := state{}
-	s.field = make(map[coord]cell, s.height*s.width)
-	s.entities = make([]entity, 0)
-	s.stg = newScanningStrategy()
 
 	s.scanner = bufio.NewScanner(os.Stdin)
 	s.scanner.Buffer(make([]byte, 1000000), 1000000)
@@ -224,12 +344,18 @@ func newState() *state {
 	s.scanner.Scan()
 	fmt.Sscan(s.scanner.Text(), &s.width, &s.height)
 
+	H = s.height
+	W = s.width
+
+	s.field = make(map[coord]cell, s.height*s.width)
+	s.entities = make(map[string]entity, 0)
+	s.stg = newSquadStrategy()
 	return &s
 }
 
 func (s *state) update() {
 	s.field = make(map[coord]cell, s.width*s.height)
-	s.entities = make([]entity, 0, len(s.entities))
+	s.entities = make(map[string]entity, len(s.entities))
 	s.scanner.Scan()
 	fmt.Sscan(s.scanner.Text(), &s.myScore, &s.enemyScore)
 
@@ -266,7 +392,12 @@ func (s *state) update() {
 		fmt.Sscan(s.scanner.Text(), &e.id, &e.what, &x, &y, &e.carry)
 
 		e.xy = coord{x, y}
-		s.entities = append(s.entities, e)
+		s.entities[e.id] = e
+		if e.what == TYPEMYROBOT {
+			s.myRobots = append(s.myRobots, e)
+		} else if e.what == TYPEENEMYROBOT {
+			s.enemyRobots = append(s.enemyRobots, e)
+		}
 	}
 }
 
