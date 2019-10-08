@@ -80,12 +80,19 @@ type entity struct {
 	xy    coord
 }
 
+const (
+	stepInventoryWait int = iota
+	stepRadarDeployed     = iota
+)
+
 type squad struct {
 	radarman string
 	trapman  string
 	other    []string
 	all      []string
 	dig      map[string]coord
+
+	step int
 
 	target coord
 }
@@ -119,6 +126,36 @@ func calcOreDists(ore map[coord]int, xy coord) map[int][]coord {
 		res[d] = append(res[d], c)
 	}
 	return res
+}
+
+type robot2 struct {
+	xy    coord
+	toXY  coord
+	carry int
+}
+
+func (r *robot2) turn() string {
+	return cmdWait()
+}
+
+func (r *robot2) reset() {
+	r.xy = coord{}
+	r.toXY = coord{}
+	r.carry = CARRYNOTHING
+}
+
+type strategy2 struct {
+	mybots map[string]*robot2
+}
+
+func newStrategy2() *strategy2 {
+	return &strategy2{
+		mybots: make(map[string]*robot2, 5),
+	}
+}
+
+func (str *strategy2) turn(s *state) {
+
 }
 
 func (sq squad) allInHQ(s *state) bool {
@@ -160,10 +197,49 @@ func (sq *squad) chooseRadarLocation(s *state) {
 
 func (sq *squad) turn(s *state) map[string]string {
 	orders := make(map[string]string, len(sq.all))
-	if sq.allCarryOre(s) {
-		log("Squad has ore!")
+	if sq.step == stepRadarDeployed {
+		log("In stepRadarDeployed")
+		atHQ := 0
 		for _, a := range sq.all {
-			orders[a] = cmdMove(0, sq.target.y)
+			xy := s.entities[a].xy
+			if s.entities[a].carry == CARRYORE {
+				log("stepRadarDeployed MOVE!")
+				orders[a] = cmdMove(0, sq.target.y)
+			} else if sq.dig[a] != (coord{}) {
+				log("stepRadarDeployed DIG!")
+				orders[a] = cmdDig(sq.dig[a].x, sq.dig[a].y)
+				if isNeighbour(sq.dig[a], xy) {
+					delete(sq.dig, a)
+				}
+			} else if xy.x == 0 {
+				atHQ++
+				orders[a] = cmdWait()
+			} else {
+				log("Searching for ore ")
+				var oreCand *coord
+				oreCandDist := W + H
+				for orexy, cnt := range s.ores {
+					if cnt <= 0 {
+						continue
+					}
+					d := dist(xy, orexy)
+					if d < oreCandDist {
+						oreCand = &orexy
+						oreCandDist = d
+					}
+				}
+				if oreCand != nil {
+					delete(s.ores, *oreCand)
+					orders[a] = cmdDig(oreCand.x, oreCand.y)
+					sq.dig[a] = *oreCand
+				} else {
+					orders[a] = cmdWait()
+				}
+			}
+		}
+		if atHQ == len(sq.all) {
+			sq.step = stepInventoryWait
+			log("setting stepInventoryWait")
 		}
 	} else if sq.allInHQ(s) {
 		log("All in HQ")
@@ -197,6 +273,7 @@ func (sq *squad) turn(s *state) map[string]string {
 			log("Moving to target ", sq.target)
 			if isNeighbour(s.entities[sq.radarman].xy, sq.target) || s.entities[sq.radarman].xy == sq.target {
 				orders[sq.radarman] = cmdDig(sq.target.x, sq.target.y)
+				sq.step = stepRadarDeployed
 				orders[sq.trapman] = cmdWait()
 				for _, o := range sq.other {
 					orders[o] = cmdWait()
@@ -207,42 +284,7 @@ func (sq *squad) turn(s *state) map[string]string {
 				}
 			}
 		} else {
-
-			log("Searching for ore ")
-			for _, a := range sq.all {
-				if s.entities[a].carry == CARRYORE {
-					log(a, " WAIT")
-					orders[a] = cmdWait()
-					continue
-				}
-				xy := s.entities[a].xy
-				if sq.dig[a] != (coord{0, 0}) {
-					orders[a] = cmdDig(sq.dig[a].x, sq.dig[a].y)
-					if isNeighbour(sq.dig[a], xy) {
-						delete(sq.dig, a)
-					}
-					continue
-				}
-				var oreCand *coord
-				oreCandDist := W + H
-				for orexy := range s.ores {
-					if len(s.ores) == 0 {
-						continue
-					}
-					d := dist(xy, orexy)
-					if d < oreCandDist {
-						oreCand = &orexy
-						oreCandDist = d
-					}
-				}
-				if oreCand != nil {
-					delete(s.ores, *oreCand)
-					orders[a] = cmdDig(oreCand.x, oreCand.y)
-					sq.dig[a] = *oreCand
-				} else {
-					orders[a] = cmdWait()
-				}
-			}
+			log("UNREACHABLE??")
 		}
 	}
 	return orders
@@ -302,7 +344,8 @@ func (stg *squadsStragery) turn(s *state) {
 		stg.rebuildSquads()
 	}
 	var orders map[string]string
-	for _, sq := range stg.squads {
+	for i, sq := range stg.squads {
+		log("TURN squad ", i)
 		o := sq.turn(s)
 		orders = merge(orders, o)
 	}
