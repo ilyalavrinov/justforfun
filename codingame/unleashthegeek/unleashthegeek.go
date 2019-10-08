@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"math"
 	"math/rand"
 	"os"
 	"sort"
@@ -84,6 +85,7 @@ type squad struct {
 	trapman  string
 	other    []string
 	all      []string
+	dig      map[string]coord
 
 	target coord
 }
@@ -106,8 +108,17 @@ func doCommand(orders map[string]string) {
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		fmt.Println(orders[k])
+		fmt.Print(orders[k])
 	}
+}
+
+func calcOreDists(ore map[coord]int, xy coord) map[int][]coord {
+	res := make(map[int][]coord)
+	for c := range ore {
+		d := dist(c, xy)
+		res[d] = append(res[d], c)
+	}
+	return res
 }
 
 func (sq squad) allInHQ(s *state) bool {
@@ -134,47 +145,57 @@ func (sq squad) isInSquad(id string) bool {
 	return false
 }
 
-func (sq squad) carryOre(s *state) bool {
+func (sq squad) allCarryOre(s *state) bool {
 	for _, a := range sq.all {
-		if s.entities[a].carry == CARRYORE {
-			return true
+		if s.entities[a].carry != CARRYORE {
+			return false
 		}
 	}
-	return false
+	return true
 }
 
-func (sq squad) chooseRadarLocation(s *state) {
-	sq.target = coord{rand.Intn(W + 1), rand.Intn(H + 1)}
+func (sq *squad) chooseRadarLocation(s *state) {
+	sq.target = coord{rand.Intn(W), rand.Intn(H)}
 }
 
-func (sq squad) turn(s *state) map[string]string {
+func (sq *squad) turn(s *state) map[string]string {
 	orders := make(map[string]string, len(sq.all))
-	if sq.carryOre(s) {
+	if sq.allCarryOre(s) {
+		log("Squad has ore!")
 		for _, a := range sq.all {
 			orders[a] = cmdMove(0, sq.target.y)
 		}
 	} else if sq.allInHQ(s) {
+		log("All in HQ")
 		if s.entities[sq.radarman].carry == CARRYRADAR {
+			log("Radarman has a radar")
 			sq.chooseRadarLocation(s)
+			log("Location chosen: ", sq.target)
 			for _, a := range sq.all {
 				orders[a] = cmdMove(sq.target.x, sq.target.y)
 			}
 		} else if s.radarCooldown != 0 || s.trapCooldown != 0 {
+			log("Cooldown not reached")
 			for _, a := range sq.all {
 				orders[a] = cmdWait()
 			}
 		} else {
+			log("Requesting stuff")
 			orders[sq.radarman] = cmdRequest(RADAR)
+			s.radarCooldown = 5
 			orders[sq.trapman] = cmdRequest(TRAP)
+			s.trapCooldown = 5
 			for _, o := range sq.other {
 				orders[o] = cmdWait()
 			}
 		}
 	} else {
 		// in the field and not returning ore
+		log("In the field")
 		if s.entities[sq.radarman].carry == CARRYRADAR {
 			// moving to target
-			if isNeighbour(s.entities[sq.radarman].xy, sq.target) {
+			log("Moving to target ", sq.target)
+			if isNeighbour(s.entities[sq.radarman].xy, sq.target) || s.entities[sq.radarman].xy == sq.target {
 				orders[sq.radarman] = cmdDig(sq.target.x, sq.target.y)
 				orders[sq.trapman] = cmdWait()
 				for _, o := range sq.other {
@@ -186,21 +207,43 @@ func (sq squad) turn(s *state) map[string]string {
 				}
 			}
 		} else {
+
+			log("Searching for ore ")
 			for _, a := range sq.all {
+				if s.entities[a].carry == CARRYORE {
+					log(a, " WAIT")
+					orders[a] = cmdWait()
+					continue
+				}
 				xy := s.entities[a].xy
-				ns := neighbours(xy)
-				for _, n := range ns {
-					if s.ores[n] > 0 {
-						orders[a] = cmdDig(n.x, n.y)
-						break
+				if sq.dig[a] != (coord{0, 0}) {
+					orders[a] = cmdDig(sq.dig[a].x, sq.dig[a].y)
+					if isNeighbour(sq.dig[a], xy) {
+						delete(sq.dig, a)
+					}
+					continue
+				}
+				var oreCand *coord
+				oreCandDist := W + H
+				for orexy := range s.ores {
+					if len(s.ores) == 0 {
+						continue
+					}
+					d := dist(xy, orexy)
+					if d < oreCandDist {
+						oreCand = &orexy
+						oreCandDist = d
 					}
 				}
-				if _, found := orders[a]; !found {
+				if oreCand != nil {
+					delete(s.ores, *oreCand)
+					orders[a] = cmdDig(oreCand.x, oreCand.y)
+					sq.dig[a] = *oreCand
+				} else {
 					orders[a] = cmdWait()
 				}
 			}
 		}
-
 	}
 	return orders
 }
@@ -236,14 +279,18 @@ func neighbours(xy coord) []coord {
 	return res
 }
 
+func dist(a, b coord) int {
+	return int(math.Abs(float64(a.x-b.x)) + math.Abs(float64(a.y-b.y)))
+}
+
 type squadsStragery struct {
-	squads []squad
+	squads []*squad
 	free   []string
 }
 
 func newSquadStrategy() *squadsStragery {
 	s := &squadsStragery{
-		squads: make([]squad, 0, 5),
+		squads: make([]*squad, 0, 5),
 		free:   make([]string, 0, 5),
 	}
 	return s
@@ -276,42 +323,54 @@ func (stg *squadsStragery) updateFree(s *state) {
 }
 
 func (stg *squadsStragery) rebuildSquads() {
+	log("rebuilding squads len ", len(stg.free))
 	if len(stg.free) >= 4 {
-		stg.squads = make([]squad, 0, 2)
+		stg.squads = make([]*squad, 0, 2)
 		if len(stg.free) == 4 {
-			stg.squads = append(stg.squads, squad{
+			stg.squads = append(stg.squads, &squad{
 				radarman: stg.free[0],
 				trapman:  stg.free[1],
+				all:      []string{stg.free[0], stg.free[1]},
 			})
-			stg.squads = append(stg.squads, squad{
+			stg.squads = append(stg.squads, &squad{
 				radarman: stg.free[2],
 				trapman:  stg.free[3],
+				all:      []string{stg.free[2], stg.free[3]},
 			})
 		} else {
-			stg.squads = append(stg.squads, squad{
+			stg.squads = append(stg.squads, &squad{
 				radarman: stg.free[0],
 				trapman:  stg.free[1],
 				other:    []string{stg.free[2]},
+				all:      []string{stg.free[0], stg.free[1], stg.free[2]},
 			})
-			stg.squads = append(stg.squads, squad{
+			stg.squads = append(stg.squads, &squad{
 				radarman: stg.free[3],
 				trapman:  stg.free[4],
+				all:      []string{stg.free[3], stg.free[4]},
 			})
 		}
 	} else {
-		stg.squads = make([]squad, 0, 1)
+		stg.squads = make([]*squad, 0, 1)
 		sq := squad{
 			radarman: stg.free[0],
+			all:      []string{stg.free[0]},
 		}
 		if len(stg.free) >= 2 {
 			sq.trapman = stg.free[1]
+			sq.all = append(sq.all, stg.free[1])
 		}
 		if len(stg.free) == 3 {
 			sq.other = []string{stg.free[2]}
+			sq.all = append(sq.all, stg.free[2])
 		}
-		stg.squads = []squad{sq}
+		stg.squads = []*squad{&sq}
 	}
 	stg.free = make([]string, 0)
+	for _, s := range stg.squads {
+		s.dig = make(map[string]coord, 5)
+	}
+	log("squads ", len(stg.squads))
 }
 
 type state struct {
@@ -356,6 +415,7 @@ func newState() *state {
 func (s *state) update() {
 	s.field = make(map[coord]cell, s.width*s.height)
 	s.entities = make(map[string]entity, len(s.entities))
+	s.ores = make(map[coord]int, W*H)
 	s.scanner.Scan()
 	fmt.Sscan(s.scanner.Text(), &s.myScore, &s.enemyScore)
 
@@ -370,6 +430,7 @@ func (s *state) update() {
 				c.ore = -1
 			} else {
 				c.ore, _ = strconv.Atoi(ore)
+				s.ores[coord{x, y}] = c.ore
 			}
 
 			hole, _ := strconv.Atoi(inputs[2*x+1])
@@ -382,6 +443,7 @@ func (s *state) update() {
 			s.field[coord{x, y}] = c
 		}
 	}
+	log("OREs", s.ores)
 	var entityCount int
 	s.scanner.Scan()
 	fmt.Sscan(s.scanner.Text(), &entityCount, &s.radarCooldown, &s.trapCooldown)
