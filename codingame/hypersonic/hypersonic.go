@@ -8,6 +8,7 @@ import (
 
 const (
 	symFloor     = '.'
+	symWall      = 'X'
 	boxEmpty     = 0
 	boxItemRange = 1
 	boxItemBomb  = 2
@@ -92,7 +93,7 @@ func newHeatmap(g grid, bombRange int) [][]int {
 				return 0
 			}
 			o := g[x][y]
-			//fmt.Fprintf(os.Stderr, "HEATMAP check X %d Y %d OBJ %v\n", x, y, o)
+			//fmt.Fprintf(os.Stderr, "HEATMAP at X %d Y %d check X %d Y %d OBJ %+v\n", xy.x, xy.y, x, y, o)
 			if o.isBox() {
 				return 1
 			}
@@ -149,6 +150,8 @@ func step(g grid, myId int) {
 		for x, c := range row {
 			if c == symFloor {
 				g[x][y] = objFloor
+			} else if c == symWall {
+				g[x][y] = objWall
 			} else {
 				boxN, _ := strconv.Atoi(string(c))
 				switch boxN {
@@ -204,6 +207,9 @@ func step(g grid, myId int) {
 	var bestScore int
 	for x, col := range h {
 		for y, score := range col {
+			if d[x][y] == -1 {
+				continue
+			}
 			if score > bestScore {
 				bestXY = coord{x, y}
 				bestScore = score
