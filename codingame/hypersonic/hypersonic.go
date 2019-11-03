@@ -3,11 +3,14 @@ package main
 import (
 	"fmt"
 	"os"
+	"strconv"
 )
 
 const (
-	symFloor = '.'
-	symBox   = '0'
+	symFloor     = '.'
+	boxEmpty     = 0
+	boxItemRange = 1
+	boxItemBomb  = 2
 
 	bombTimer = 8
 	bombSpan  = 3
@@ -15,6 +18,10 @@ const (
 
 	entityPlayer = 0
 	entityBomb   = 1
+	entityItem   = 2
+
+	itemRange = 1
+	itemBomb  = 2
 )
 
 var (
@@ -37,14 +44,22 @@ func cmdBomb(xy coord) string {
 type objectType int
 
 const (
-	objMe        objectType = iota
-	objEnemy     objectType = iota
-	objBox       objectType = iota
-	objMyBomb    objectType = iota
-	objEnemyBomb objectType = iota
-	objFloor     objectType = iota
-	objWall      objectType = iota
+	objMe           objectType = iota
+	objEnemy        objectType = iota
+	objBoxEmpty     objectType = iota
+	objBoxItemRange objectType = iota
+	objBoxItemBomb  objectType = iota
+	objMyBomb       objectType = iota
+	objEnemyBomb    objectType = iota
+	objFloor        objectType = iota
+	objWall         objectType = iota
+	objItemRange    objectType = iota
+	objItemBomb     objectType = iota
 )
+
+func (o objectType) isBox() bool {
+	return o == objBoxEmpty || o == objBoxItemBomb || o == objBoxItemRange
+}
 
 type grid [][]objectType
 
@@ -77,10 +92,11 @@ func newHeatmap(g grid, bombRange int) [][]int {
 				return 0
 			}
 			o := g[x][y]
-			switch o {
-			case objBox:
+			//fmt.Fprintf(os.Stderr, "HEATMAP check X %d Y %d OBJ %v\n", x, y, o)
+			if o.isBox() {
 				return 1
-			case objWall:
+			}
+			if o == objWall || o == objItemRange || o == objItemBomb {
 				return 0
 			}
 		}
@@ -89,7 +105,7 @@ func newHeatmap(g grid, bombRange int) [][]int {
 	for x := 0; x < width; x++ {
 		for y := 0; y < height; y++ {
 			o := g[x][y]
-			if o == objBox || o == objWall {
+			if o.isBox() || o == objWall {
 				continue
 			}
 			var heatVal int
@@ -109,7 +125,7 @@ func newDistances(g grid, pos coord) [][]int {
 	frontier := []coord{pos}
 	f[pos.x][pos.y] = 0
 	checkAndAdd := func(x, y, dist int) {
-		if x >= 0 && x < width && y >= 0 && y < height && g[x][y] != objBox && g[x][y] != objWall && f[x][y] == -1 {
+		if x >= 0 && x < width && y >= 0 && y < height && !g[x][y].isBox() && g[x][y] != objWall && f[x][y] == -1 {
 			frontier = append(frontier, coord{x, y})
 			f[x][y] = dist
 			//fmt.Fprintf(os.Stderr, "new frontier X %d Y %d DIST %d\n", x, y, dist)
@@ -131,11 +147,18 @@ func step(g grid, myId int) {
 		var row string
 		fmt.Scan(&row)
 		for x, c := range row {
-			switch c {
-			case symFloor:
+			if c == symFloor {
 				g[x][y] = objFloor
-			case symBox:
-				g[x][y] = objBox
+			} else {
+				boxN, _ := strconv.Atoi(string(c))
+				switch boxN {
+				case boxEmpty:
+					g[x][y] = objBoxEmpty
+				case boxItemRange:
+					g[x][y] = objBoxItemRange
+				case boxItemBomb:
+					g[x][y] = objBoxItemBomb
+				}
 			}
 		}
 	}
@@ -161,6 +184,13 @@ func step(g grid, myId int) {
 				g[x][y] = objMyBomb
 			} else {
 				g[x][y] = objEnemyBomb
+			}
+		case entityItem:
+			switch param1 {
+			case itemRange:
+				g[x][y] = objItemRange
+			case itemBomb:
+				g[x][y] = objItemBomb
 			}
 		}
 	}
