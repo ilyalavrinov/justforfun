@@ -14,8 +14,6 @@ const (
 	boxItemBomb  = 2
 
 	bombTimer = 8
-	bombSpan  = 3
-	bombMax   = 1
 
 	entityPlayer = 0
 	entityBomb   = 1
@@ -23,6 +21,11 @@ const (
 
 	itemRange = 1
 	itemBomb  = 2
+)
+
+var (
+	bombSpan  int = 3
+	bombAvail int = 1
 )
 
 var (
@@ -179,6 +182,8 @@ func step(g grid, myId int) {
 			if owner == myId {
 				g[x][y] = objMe
 				myPos = coord{x, y}
+				bombAvail = param1
+				bombSpan = param2
 			} else {
 				g[x][y] = objEnemy
 			}
