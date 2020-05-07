@@ -63,6 +63,8 @@ func (g *gamestate) rescan(scanner *bufio.Scanner) {
 	var visiblePacCount int
 	scanner.Scan()
 	fmt.Sscan(scanner.Text(), &visiblePacCount)
+	g.myPacs = make([]pacman, 0, visiblePacCount)
+	g.opponentPacs = make([]pacman, 0, visiblePacCount)
 	for i := 0; i < visiblePacCount; i++ {
 		p := pacman{}
 		scanner.Scan()
@@ -78,7 +80,7 @@ func (g *gamestate) rescan(scanner *bufio.Scanner) {
 	var visiblePelletCount int
 	scanner.Scan()
 	fmt.Sscan(scanner.Text(), &visiblePelletCount)
-
+	g.pellets = make([]pellet, 0, visiblePelletCount)
 	for i := 0; i < visiblePelletCount; i++ {
 		p := pellet{}
 		scanner.Scan()
@@ -88,16 +90,13 @@ func (g *gamestate) rescan(scanner *bufio.Scanner) {
 	sort.Slice(g.pellets, func(i, j int) bool {
 		pi := g.pellets[i]
 		pj := g.pellets[j]
-		if pi.value >= pj.value {
-			return false
+		if pi.value != pj.value {
+			return pi.value < pj.value
 		}
-		if pi.x >= pj.x {
-			return false
+		if pi.x != pj.x {
+			return pi.x < pi.y
 		}
-		if pi.y >= pj.y {
-			return false
-		}
-		return true
+		return pi.y < pj.y
 	})
 }
 
