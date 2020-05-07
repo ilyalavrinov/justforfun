@@ -94,7 +94,7 @@ func (g *gamestate) rescan(scanner *bufio.Scanner) {
 			return pi.value < pj.value
 		}
 		if pi.x != pj.x {
-			return pi.x < pi.y
+			return pi.x < pj.x
 		}
 		return pi.y < pj.y
 	})
