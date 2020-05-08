@@ -120,10 +120,17 @@ func main() {
 	for {
 		state.rescan(scanner)
 
+		cmds := make([]string, 0, len(state.myPacs))
+
 		targets := make(map[int]coord, len(state.myPacs))
 		takenCoords := make(map[coord]bool, len(state.myPacs))
 
 		for _, pac := range state.myPacs {
+			if pac.abilityCooldown == 0 {
+				cmds = append(cmds, fmt.Sprintf("SPEED %d", pac.id))
+				continue
+			}
+
 			var bestChoice pellet
 			for _, p := range state.pellets {
 				c := coord{p.x, p.y}
@@ -149,7 +156,6 @@ func main() {
 			}
 		}
 
-		cmds := make([]string, 0, len(state.myPacs))
 		for pacId, c := range targets {
 			cmds = append(cmds, fmt.Sprintf("MOVE %d %d %d", pacId, c.x, c.y))
 		}
