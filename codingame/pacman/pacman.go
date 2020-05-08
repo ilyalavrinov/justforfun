@@ -3,8 +3,10 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"math"
 	"os"
 	"sort"
+	"strings"
 )
 
 type pacman struct {
@@ -100,6 +102,14 @@ func (g *gamestate) rescan(scanner *bufio.Scanner) {
 	})
 }
 
+type coord struct {
+	x, y int
+}
+
+func dist(a, b coord) float64 {
+	return math.Sqrt(math.Pow(float64(a.x-b.x), 2) + math.Pow(float64(a.y-b.y), 2))
+}
+
 func main() {
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Buffer(make([]byte, 1000000), 1000000)
@@ -110,14 +120,39 @@ func main() {
 	for {
 		state.rescan(scanner)
 
-		for i, pac := range state.myPacs {
-			ix := len(state.pellets) - i - 1
-			if ix < 0 {
-				fmt.Fprintln(os.Stderr, "No more known pellets!")
-				fmt.Println("MOVE", pac.id, pac.x, pac.y)
-			} else {
-				fmt.Println("MOVE", pac.id, state.pellets[ix].x, state.pellets[ix].y)
+		targets := make(map[int]coord, len(state.myPacs))
+		takenCoords := make(map[coord]bool, len(state.myPacs))
+
+		for _, pac := range state.myPacs {
+			var bestChoice pellet
+			for _, p := range state.pellets {
+				c := coord{p.x, p.y}
+				if takenCoords[c] {
+					continue
+				}
+
+				if p.value > bestChoice.value {
+					bestChoice = p
+				} else if p.value == bestChoice.value {
+					// TODO: calc dis correctly via BFS or something
+					d1 := dist(coord{pac.x, pac.y}, c)
+					d2 := dist(coord{pac.x, pac.y}, coord{bestChoice.x, bestChoice.y})
+					if d1 < d2 {
+						bestChoice = p
+					}
+				}
+			}
+			if bestChoice.value != 0 {
+				c := coord{bestChoice.x, bestChoice.y}
+				targets[pac.id] = c
+				takenCoords[c] = true
 			}
 		}
+
+		cmds := make([]string, 0, len(state.myPacs))
+		for pacId, c := range targets {
+			cmds = append(cmds, fmt.Sprintf("MOVE %d %d %d", pacId, c.x, c.y))
+		}
+		fmt.Println(strings.Join(cmds, " | "))
 	}
 }
