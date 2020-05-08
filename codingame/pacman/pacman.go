@@ -111,11 +111,12 @@ func main() {
 		state.rescan(scanner)
 
 		for i, pac := range state.myPacs {
-			if i < len(state.pellets) {
-				fmt.Println("MOVE", pac.id, state.pellets[i].x, state.pellets[i].y)
-			} else {
-				fmt.Fprintln(os.Stderr, "No more pellets!")
+			ix := len(state.pellets) - i - 1
+			if ix < 0 {
+				fmt.Fprintln(os.Stderr, "No more known pellets!")
 				fmt.Println("MOVE", pac.id, pac.x, pac.y)
+			} else {
+				fmt.Println("MOVE", pac.id, state.pellets[ix].x, state.pellets[ix].y)
 			}
 		}
 	}
