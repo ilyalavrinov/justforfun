@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"math"
+	"math/rand"
 	"os"
 	"sort"
 	"strings"
@@ -110,6 +111,21 @@ func dist(a, b coord) float64 {
 	return math.Sqrt(math.Pow(float64(a.x-b.x), 2) + math.Pow(float64(a.y-b.y), 2))
 }
 
+func randomCoord(f *gamefield) coord {
+	found := false
+	var c coord
+	for !found {
+		x := rand.Intn(f.width)
+		y := rand.Intn(f.height)
+		sym := f.rows[y][x]
+		if string(sym) == " " {
+			c = coord{x, y}
+			found = true
+		}
+	}
+	return c
+}
+
 func main() {
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Buffer(make([]byte, 1000000), 1000000)
@@ -124,6 +140,7 @@ func main() {
 
 		targets := make(map[int]coord, len(state.myPacs))
 		takenCoords := make(map[coord]bool, len(state.myPacs))
+		randomMove := make([]int, 0, len(state.myPacs))
 
 		for _, pac := range state.myPacs {
 			if pac.abilityCooldown == 0 {
@@ -153,10 +170,17 @@ func main() {
 				c := coord{bestChoice.x, bestChoice.y}
 				targets[pac.id] = c
 				takenCoords[c] = true
+				continue
 			}
+
+			randomMove = append(randomMove, pac.id)
 		}
 
 		for pacId, c := range targets {
+			cmds = append(cmds, fmt.Sprintf("MOVE %d %d %d", pacId, c.x, c.y))
+		}
+		for _, pacId := range randomMove {
+			c := randomCoord(field)
 			cmds = append(cmds, fmt.Sprintf("MOVE %d %d %d", pacId, c.x, c.y))
 		}
 		fmt.Println(strings.Join(cmds, " | "))
