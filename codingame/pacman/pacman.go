@@ -111,6 +111,25 @@ func dist(a, b coord) float64 {
 	return math.Sqrt(math.Pow(float64(a.x-b.x), 2) + math.Pow(float64(a.y-b.y), 2))
 }
 
+func enemyNearby(my pacman, state *gamestate) *pacman {
+	for _, enemy := range state.opponentPacs {
+		if dist(coord{my.x, my.y}, coord{enemy.x, enemy.y}) <= 2 {
+			return &enemy
+		}
+	}
+	return nil
+}
+
+var countertypes map[string]string = map[string]string{
+	"ROCK":     "PAPER",
+	"PAPER":    "SCISSORS",
+	"SCISSORS": "ROCK",
+}
+
+func countertype(t string) string {
+	return countertypes[t]
+}
+
 func randomCoord(f *gamefield) coord {
 	found := false
 	var c coord
@@ -144,7 +163,12 @@ func main() {
 
 		for _, pac := range state.myPacs {
 			if pac.abilityCooldown == 0 {
-				cmds = append(cmds, fmt.Sprintf("SPEED %d", pac.id))
+				enemyPac := enemyNearby(pac, state)
+				if enemyPac != nil {
+					cmds = append(cmds, fmt.Sprintf("SWITCH %d %s", pac.id, countertype(enemyPac.typeId)))
+				} else {
+					cmds = append(cmds, fmt.Sprintf("SPEED %d", pac.id))
+				}
 				continue
 			}
 
