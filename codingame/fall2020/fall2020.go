@@ -2,7 +2,10 @@ package main
 
 import (
 	"fmt"
+	"math/rand"
+	"os"
 	"sort"
+	"time"
 )
 
 const (
@@ -36,6 +39,9 @@ func (a *action) scan() {
 }
 
 func main() {
+	seed := time.Now().UnixNano()
+	rand.Seed(seed)
+	fmt.Fprintf(os.Stderr, "SEED %d\n", seed)
 	for {
 		turn()
 	}
@@ -59,9 +65,13 @@ func turn() {
 	invEnemy := inventory{}
 	invEnemy.scan()
 
+	brews := make([]action, 0, len(actions))
 	brewable := make([]action, 0, len(actions))
 	castableNow := make([]action, 0, len(actions))
 	for _, a := range actions {
+		if a.actionType == BREW {
+			brews = append(brews, a)
+		}
 		if canBrew(invMe, a) {
 			brewable = append(brewable, a)
 		} else if canCast(invMe, a) {
@@ -76,12 +86,14 @@ func turn() {
 		best := brewable[len(brewable)-1]
 		fmt.Printf("%s %d\n", BREW, best.actionId)
 	} else if len(castableNow) > 0 {
-		sort.Slice(castableNow, func(i, j int) bool {
+		/*sort.Slice(castableNow, func(i, j int) bool {
 			iNet := castableNow[i].delta0 + castableNow[i].delta1 + castableNow[i].delta2 + castableNow[i].delta3
 			jNet := castableNow[j].delta0 + castableNow[j].delta1 + castableNow[j].delta2 + castableNow[j].delta3
 			return iNet < jNet
 		})
-		best := castableNow[len(castableNow)-1]
+		*/
+		best := castableNow[rand.Intn(len(castableNow))]
+		fmt.Fprintf(os.Stderr, "Random cast! LEN castable now %d", len(castableNow))
 		fmt.Printf("%s %d\n", CAST, best.actionId)
 	} else {
 		fmt.Println(REST)
@@ -124,4 +136,24 @@ func canCast(i inventory, a action) bool {
 		return false
 	}
 	return true
+}
+
+func brewInOneCast(inv inventory, brews []action, casts []action) map[action]action {
+	brewsAfterCast := make(map[action]action, 0)
+	for _, c := range casts {
+		inv2 := inv
+		inv2.inv0 += c.delta0
+		inv2.inv1 += c.delta1
+		inv2.inv2 += c.delta2
+		inv2.inv3 += c.delta3
+
+		for _, b := range brews {
+			if canBrew(inv2, b) {
+				fmt.Fprintf(os.Stderr, "Can brew %d in 1 cast %d", b.actionId, c.actionId)
+				brewsAfterCast[b] = c // TODO: could be more casts leading to same brew
+			}
+		}
+	}
+
+	return brewsAfterCast
 }
