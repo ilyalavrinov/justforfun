@@ -146,6 +146,109 @@ func newDistances(g grid, pos coord) [][]int {
 	return f
 }
 
+type bomb struct {
+	xy        coord
+	owner     int
+	countdown int
+	span      int
+}
+
+type bombs struct {
+	pos         map[coord]bomb
+	byCountdown []bomb
+}
+
+type bombNetworks struct {
+	networks   []map[coord]struct{}
+	membership map[coord]int
+}
+
+func newBombmap(b bombs, g grid) [][]int {
+	f := newField(-1)
+
+	findBomb := func(b bomb, xMult, yMult int) *coord {
+		for r := 1; r < b.span; r++ {
+			x := b.xy.x + r*xMult
+			y := b.xy.y + r*yMult
+			if x < 0 || x >= width || y < 0 || y >= height {
+				return nil
+			}
+			o := g[x][y]
+			if o.isBox() || o == objWall || o == objItemRange || o == objItemBomb {
+				return nil
+			}
+			if o == objMyBomb || o == objEnemyBomb {
+				// TODO: can have some more bomb further if range is big enough
+				return &coord{x, y}
+			}
+		}
+		return nil
+	}
+
+	adjacents := make(map[coord][]coord, 0)
+	for _, bmb := range b.pos {
+		if xy := findBomb(bmb, 1, 0); xy != nil {
+			adjacents[bmb.xy] = append(adjacents[bmb.xy], *xy)
+		}
+		if xy := findBomb(bmb, -1, 0); xy != nil {
+			adjacents[bmb.xy] = append(adjacents[bmb.xy], *xy)
+		}
+		if xy := findBomb(bmb, 0, 1); xy != nil {
+			adjacents[bmb.xy] = append(adjacents[bmb.xy], *xy)
+		}
+		if xy := findBomb(bmb, 0, -1); xy != nil {
+			adjacents[bmb.xy] = append(adjacents[bmb.xy], *xy)
+		}
+	}
+
+	chains := make([]map[coord]struct{}, 0)
+	curChain := make(map[coord]struct{}, 0)
+	frontier := make([]coord, 0)
+
+	for len(adjacents) > 0 {
+		if len(frontier) > 0 {
+			newFrontier := make([]coord, 0)
+			for _, xy := range frontier {
+				adj := adjacents[xy]
+				delete(adjacents, xy)
+				curChain[xy] = struct{}{}
+				for _, xy2 := range adj {
+					if _, found := adjacents[xy2]; found {
+						newFrontier = append(newFrontier, xy2)
+					}
+				}
+			}
+			frontier = newFrontier
+		} else {
+			if len(curChain) > 0 {
+				chains = append(chains, curChain)
+				fmt.Fprintf(os.Stderr, "Added new chain of %d elements to list of chains (now len %d)\n", len(curChain), len(chains))
+				curChain = make(map[coord]struct{}, 0)
+			}
+			var xy coord
+			var adj []coord
+			for c, ch := range adjacents {
+				xy = c
+				adj = ch
+				break
+			}
+			delete(adjacents, xy)
+			curChain[xy] = struct{}{}
+			for _, xy2 := range adj {
+				fmt.Fprintf(os.Stderr, "New adjacent for bomb at %v: %v\n", xy, xy2)
+				frontier = append(frontier, xy2)
+			}
+		}
+
+		if len(curChain) > 0 {
+			chains = append(chains, curChain)
+			fmt.Fprintf(os.Stderr, "Added new chain of %d elements to list of chains (now len %d)\n", len(curChain), len(chains))
+		}
+
+	}
+	return f
+}
+
 func step(g grid, myId int) {
 	for y := 0; y < height; y++ {
 		var row string
@@ -205,6 +308,7 @@ func step(g grid, myId int) {
 
 	h := newHeatmap(g, bombSpan)
 	d := newDistances(g, myPos)
+	b := newBombmap(bmb, g)
 
 	fmt.Fprintf(os.Stderr, "HEATMAP\n %v\n DIST\n %v", h, d)
 
