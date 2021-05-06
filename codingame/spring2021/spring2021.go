@@ -6,8 +6,17 @@ import (
 	"os"
 )
 
+const (
+	priceCompleteSun       = 4
+	priceCompleteNutrients = 1
+)
+
 func debug(args ...interface{}) {
 	fmt.Fprintln(os.Stderr, args...)
+}
+
+func debugf(format string, args ...interface{}) {
+	fmt.Fprintf(os.Stderr, format, args...)
 }
 
 func cmdGrow(ix int) {
@@ -38,6 +47,34 @@ type Cell struct {
 	richness int
 }
 
+type Field struct {
+	numberOfCells int
+	cells         []Cell
+}
+
+func NewField() Field {
+	field := Field{}
+
+	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Buffer(make([]byte, 1000000), 1000000)
+
+	scanner.Scan()
+	fmt.Sscan(scanner.Text(), &field.numberOfCells)
+	cells := make([]Cell, 0, field.numberOfCells)
+	for i := 0; i < field.numberOfCells; i++ {
+		var index, richness, neigh0, neigh1, neigh2, neigh3, neigh4, neigh5 int
+		scanner.Scan()
+		fmt.Sscan(scanner.Text(), &index, &richness, &neigh0, &neigh1, &neigh2, &neigh3, &neigh4, &neigh5)
+		cells = append(cells, Cell{
+			index:    index,
+			richness: richness,
+		})
+	}
+	field.cells = cells
+
+	return field
+}
+
 type Tree struct {
 	cellIndex int
 	size      int
@@ -46,10 +83,10 @@ type Tree struct {
 }
 
 type GameState struct {
-	numberOfCells int
-	cells         []Cell
-	day           int
-	nutrients     int
+	field Field
+
+	day       int
+	nutrients int
 
 	mySun, myScore   int
 	oppSun, oppScore int
@@ -61,28 +98,13 @@ type GameState struct {
 	numberOfPossibleMoves int
 }
 
-func NewGameState() GameState {
-	state := GameState{}
+func NewGameState(field Field) GameState {
+	state := GameState{
+		field: field,
+	}
 
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Buffer(make([]byte, 1000000), 1000000)
-
-	scanner.Scan()
-	fmt.Sscan(scanner.Text(), &state.numberOfCells)
-	cells := make([]Cell, 0, state.numberOfCells)
-	for i := 0; i < state.numberOfCells; i++ {
-		// index: 0 is the center cell, the next cells spiral outwards
-		// richness: 0 if the cell is unusable, 1-3 for usable cells
-		// neigh0: the index of the neighbouring cell for each direction
-		var index, richness, neigh0, neigh1, neigh2, neigh3, neigh4, neigh5 int
-		scanner.Scan()
-		fmt.Sscan(scanner.Text(), &index, &richness, &neigh0, &neigh1, &neigh2, &neigh3, &neigh4, &neigh5)
-		cells = append(cells, Cell{
-			index:    index,
-			richness: richness,
-		})
-	}
-	state.cells = cells
 
 	scanner.Scan()
 	fmt.Sscan(scanner.Text(), &state.day)
@@ -102,10 +124,6 @@ func NewGameState() GameState {
 	fmt.Sscan(scanner.Text(), &state.numberOfTrees)
 	trees := make([]Tree, 0, state.numberOfTrees)
 	for i := 0; i < state.numberOfTrees; i++ {
-		// cellIndex: location of this tree
-		// size: size of this tree: 0-3
-		// isMine: 1 if this is your tree
-		// isDormant: 1 if this tree is dormant
 		var cellIndex, size int
 		var isMine, isDormant bool
 		var _isMine, _isDormant int
@@ -113,7 +131,7 @@ func NewGameState() GameState {
 		fmt.Sscan(scanner.Text(), &cellIndex, &size, &_isMine, &_isDormant)
 		isMine = _isMine != 0
 		isDormant = _isDormant != 0
-		state.trees = append(trees, Tree{
+		trees = append(trees, Tree{
 			cellIndex: cellIndex,
 			size:      size,
 			isMine:    isMine,
@@ -122,6 +140,7 @@ func NewGameState() GameState {
 	}
 	state.trees = trees
 
+	scanner.Scan()
 	fmt.Sscan(scanner.Text(), &state.numberOfPossibleMoves)
 	for i := 0; i < state.numberOfPossibleMoves; i++ {
 		scanner.Scan()
@@ -132,9 +151,36 @@ func NewGameState() GameState {
 	return state
 }
 
+func greedyComplete(state GameState) {
+	debug("greedy start")
+	bestIx := state.field.numberOfCells + 1
+	bestScore := 0
+	for _, t := range state.trees {
+		debugf("new tree check: cellIndex %d; mine: %t\n", t.cellIndex, t.isMine)
+		if !t.isMine {
+			continue
+		}
+		score := (state.field.cells[t.cellIndex].richness-1)*2 + state.nutrients
+		if score > bestScore {
+			debug()
+			bestIx = t.cellIndex
+			bestScore = score
+		}
+	}
+
+	if bestIx < state.field.numberOfCells+1 {
+		cmdComplete(bestIx)
+	} else {
+		cmdWait()
+	}
+	debug("greedy finish")
+}
+
 func main() {
+	field := NewField()
 	for {
-		_ := NewGameState()
-		cmdWaitMsg("Hello")
+		state := NewGameState(field)
+		debugf("new day; cells: %d, trees: %d\n", len(state.field.cells), len(state.trees))
+		greedyComplete(state)
 	}
 }
