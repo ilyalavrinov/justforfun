@@ -52,16 +52,15 @@ type Field struct {
 	cells         []Cell
 }
 
-func NewField() Field {
+func NewField(scanner *bufio.Scanner) Field {
+	debug("new field started")
 	field := Field{}
-
-	scanner := bufio.NewScanner(os.Stdin)
-	scanner.Buffer(make([]byte, 1000000), 1000000)
 
 	scanner.Scan()
 	fmt.Sscan(scanner.Text(), &field.numberOfCells)
 	cells := make([]Cell, 0, field.numberOfCells)
 	for i := 0; i < field.numberOfCells; i++ {
+		debugf("new field: reading cell %d of %d\n", i, field.numberOfCells)
 		var index, richness, neigh0, neigh1, neigh2, neigh3, neigh4, neigh5 int
 		scanner.Scan()
 		fmt.Sscan(scanner.Text(), &index, &richness, &neigh0, &neigh1, &neigh2, &neigh3, &neigh4, &neigh5)
@@ -72,6 +71,7 @@ func NewField() Field {
 	}
 	field.cells = cells
 
+	debug("new field finished")
 	return field
 }
 
@@ -98,32 +98,36 @@ type GameState struct {
 	numberOfPossibleMoves int
 }
 
-func NewGameState(field Field) GameState {
+func NewGameState(field Field, scanner *bufio.Scanner) GameState {
+	debug("new state started")
 	state := GameState{
 		field: field,
 	}
 
-	scanner := bufio.NewScanner(os.Stdin)
-	scanner.Buffer(make([]byte, 1000000), 1000000)
-
+	debug("new state: scan day")
 	scanner.Scan()
 	fmt.Sscan(scanner.Text(), &state.day)
 
+	debug("new state: scan nutrients")
 	scanner.Scan()
 	fmt.Sscan(scanner.Text(), &state.nutrients)
 
+	debug("new state: scan my sun & score")
 	scanner.Scan()
 	fmt.Sscan(scanner.Text(), &state.mySun, &state.myScore)
 
+	debug("new state: scan opp sun & score")
 	var _oppIsWaiting int
 	scanner.Scan()
 	fmt.Sscan(scanner.Text(), &state.oppSun, &state.oppScore, &_oppIsWaiting)
 	state.oppIsWaiting = _oppIsWaiting != 0
 
+	debug("new state: scan number of trees")
 	scanner.Scan()
 	fmt.Sscan(scanner.Text(), &state.numberOfTrees)
 	trees := make([]Tree, 0, state.numberOfTrees)
 	for i := 0; i < state.numberOfTrees; i++ {
+		debugf("new state: reading tree %d of %d\n", i, state.numberOfTrees)
 		var cellIndex, size int
 		var isMine, isDormant bool
 		var _isMine, _isDormant int
@@ -140,6 +144,7 @@ func NewGameState(field Field) GameState {
 	}
 	state.trees = trees
 
+	debug("new state: scan possible moves")
 	scanner.Scan()
 	fmt.Sscan(scanner.Text(), &state.numberOfPossibleMoves)
 	for i := 0; i < state.numberOfPossibleMoves; i++ {
@@ -148,6 +153,7 @@ func NewGameState(field Field) GameState {
 		_ = possibleMove // to avoid unused error
 	}
 
+	debug("new state finished")
 	return state
 }
 
@@ -177,10 +183,20 @@ func greedyComplete(state GameState) {
 }
 
 func main() {
-	field := NewField()
+	firstScan := true
+	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Buffer(make([]byte, 1000000), 1000000)
+
+	field := NewField(scanner)
 	for {
-		state := NewGameState(field)
+		if !firstScan {
+			scanner := bufio.NewScanner(os.Stdin)
+			scanner.Buffer(make([]byte, 1000000), 1000000)
+		}
+		state := NewGameState(field, scanner)
 		debugf("new day; cells: %d, trees: %d\n", len(state.field.cells), len(state.trees))
 		greedyComplete(state)
+
+		firstScan = false
 	}
 }
