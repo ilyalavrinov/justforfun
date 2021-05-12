@@ -403,21 +403,27 @@ func main() {
 		}
 		state := NewGameState(field, scanner)
 		debugf("new day %d; cells: %d, trees: %d\n", state.day, len(state.field.cells), len(state.trees))
-		c := greedyGrow(state)
-		if c == nil {
-			seedN := numTreesBySize(state, 0)
-			debugf("seeds %d\n", seedN)
-			if seedN <= (maxDays-state.day)/6 {
-				c = greedySeed(state)
-			}
+		var c Command
+		if state.day >= maxDays-1 {
+			c = greedyComplete(state)
+		} else {
+			c = greedyGrow(state)
 			if c == nil {
-				if numTreesBySize(state, 3) > 1 || state.day == maxDays {
-					c = greedyComplete(state)
+				seedN := numTreesBySize(state, 0)
+				debugf("seeds %d\n", seedN)
+				if seedN <= (maxDays-state.day)/6 {
+					c = greedySeed(state)
 				}
 				if c == nil {
-					c = NewCmdWait()
+					if numTreesBySize(state, 3) > 1 {
+						c = greedyComplete(state)
+					}
 				}
 			}
+		}
+
+		if c == nil {
+			c = NewCmdWait()
 		}
 
 		c.Do()
