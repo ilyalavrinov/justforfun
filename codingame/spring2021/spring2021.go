@@ -19,27 +19,104 @@ func debugf(format string, args ...interface{}) {
 	fmt.Fprintf(os.Stderr, format, args...)
 }
 
-func cmdGrow(ix int) {
-	fmt.Printf("GROW %d\n", ix)
+type Command interface {
+	Do()
 }
 
-func cmdWait() {
-	cmdWaitMsg("")
+type cmdGrow struct {
+	ix int
 }
 
-func cmdWaitMsg(msg string) {
-	if msg != "" {
-		fmt.Printf("WAIT %s\n", msg)
+func NewCmdGrow(ix int) Command {
+	return cmdGrow{
+		ix: ix,
+	}
+}
+
+func (c cmdGrow) Do() {
+	fmt.Printf("GROW %d\n", c.ix)
+}
+
+type cmdWait struct {
+	msg string
+}
+
+func NewCmdWaitMsg(msg string) Command {
+	return cmdWait{
+		msg: msg,
+	}
+}
+
+func NewCmdWait() Command {
+	return NewCmdWaitMsg("")
+}
+
+func (c cmdWait) Do() {
+	if c.msg != "" {
+		fmt.Printf("WAIT %s\n", c.msg)
 	}
 	fmt.Println("WAIT")
 }
 
-func cmdComplete(ix int) {
-	fmt.Printf("COMPLETE %d\n", ix)
+type cmdComplete struct {
+	ix int
 }
 
-func cmdSeed(from, to int) {
-	fmt.Printf("SEED %d %d\n", from, to)
+func NewCmdComplete(ix int) Command {
+	return cmdComplete{
+		ix: ix,
+	}
+}
+
+func (c cmdComplete) Do() {
+	fmt.Printf("COMPLETE %d\n", c.ix)
+}
+
+type cmdSeed struct {
+	from, to int
+}
+
+func NewCmdSeed(from, to int) Command {
+	return cmdSeed{
+		from: from,
+		to:   to,
+	}
+}
+
+func (c cmdSeed) Do() {
+	fmt.Printf("SEED %d %d\n", c.from, c.to)
+}
+
+func numTreesBySize(state GameState, size int) int {
+	n := 0
+	for _, t := range state.trees {
+		if t.isMine {
+			continue
+		}
+		if t.size != size {
+			continue
+		}
+		n++
+	}
+	return n
+}
+
+func costSeed(state GameState) int {
+	return numTreesBySize(state, 0)
+}
+
+func costGrow(state GameState, sizeFrom int) int {
+	cost := 0
+	switch sizeFrom {
+	case 0:
+		cost = 1
+	case 1:
+		cost = 3
+	case 2:
+		cost = 7
+	}
+
+	return cost + numTreesBySize(state, sizeFrom+1)
 }
 
 type Cell struct {
@@ -53,14 +130,12 @@ type Field struct {
 }
 
 func NewField(scanner *bufio.Scanner) Field {
-	debug("new field started")
 	field := Field{}
 
 	scanner.Scan()
 	fmt.Sscan(scanner.Text(), &field.numberOfCells)
 	cells := make([]Cell, 0, field.numberOfCells)
 	for i := 0; i < field.numberOfCells; i++ {
-		debugf("new field: reading cell %d of %d\n", i, field.numberOfCells)
 		var index, richness, neigh0, neigh1, neigh2, neigh3, neigh4, neigh5 int
 		scanner.Scan()
 		fmt.Sscan(scanner.Text(), &index, &richness, &neigh0, &neigh1, &neigh2, &neigh3, &neigh4, &neigh5)
@@ -71,7 +146,6 @@ func NewField(scanner *bufio.Scanner) Field {
 	}
 	field.cells = cells
 
-	debug("new field finished")
 	return field
 }
 
@@ -99,35 +173,28 @@ type GameState struct {
 }
 
 func NewGameState(field Field, scanner *bufio.Scanner) GameState {
-	debug("new state started")
 	state := GameState{
 		field: field,
 	}
 
-	debug("new state: scan day")
 	scanner.Scan()
 	fmt.Sscan(scanner.Text(), &state.day)
 
-	debug("new state: scan nutrients")
 	scanner.Scan()
 	fmt.Sscan(scanner.Text(), &state.nutrients)
 
-	debug("new state: scan my sun & score")
 	scanner.Scan()
 	fmt.Sscan(scanner.Text(), &state.mySun, &state.myScore)
 
-	debug("new state: scan opp sun & score")
 	var _oppIsWaiting int
 	scanner.Scan()
 	fmt.Sscan(scanner.Text(), &state.oppSun, &state.oppScore, &_oppIsWaiting)
 	state.oppIsWaiting = _oppIsWaiting != 0
 
-	debug("new state: scan number of trees")
 	scanner.Scan()
 	fmt.Sscan(scanner.Text(), &state.numberOfTrees)
 	trees := make([]Tree, 0, state.numberOfTrees)
 	for i := 0; i < state.numberOfTrees; i++ {
-		debugf("new state: reading tree %d of %d\n", i, state.numberOfTrees)
 		var cellIndex, size int
 		var isMine, isDormant bool
 		var _isMine, _isDormant int
@@ -144,7 +211,6 @@ func NewGameState(field Field, scanner *bufio.Scanner) GameState {
 	}
 	state.trees = trees
 
-	debug("new state: scan possible moves")
 	scanner.Scan()
 	fmt.Sscan(scanner.Text(), &state.numberOfPossibleMoves)
 	for i := 0; i < state.numberOfPossibleMoves; i++ {
@@ -153,12 +219,11 @@ func NewGameState(field Field, scanner *bufio.Scanner) GameState {
 		_ = possibleMove // to avoid unused error
 	}
 
-	debug("new state finished")
 	return state
 }
 
-func greedyComplete(state GameState) {
-	debug("greedy start")
+func greedyComplete(state GameState) Command {
+	debug("greedy complete start")
 	bestIx := state.field.numberOfCells + 1
 	bestScore := 0
 	for _, t := range state.trees {
@@ -166,20 +231,50 @@ func greedyComplete(state GameState) {
 		if !t.isMine {
 			continue
 		}
+		if t.size != 3 {
+			continue
+		}
 		score := (state.field.cells[t.cellIndex].richness-1)*2 + state.nutrients
 		if score > bestScore {
-			debug()
+			debugf("New best score %d on cell %d (was score %d cell %d)\n", score, t.cellIndex, bestScore, bestIx)
 			bestIx = t.cellIndex
 			bestScore = score
 		}
 	}
 
+	var res Command
 	if bestIx < state.field.numberOfCells+1 {
-		cmdComplete(bestIx)
-	} else {
-		cmdWait()
+		res = NewCmdComplete(bestIx)
 	}
-	debug("greedy finish")
+	debugf("greedy complete finish res=%+v", res)
+	return res
+}
+
+func greedyGrow(state GameState) Command {
+	debug("greedy grow start")
+	bestIx := state.field.numberOfCells + 1
+	bestSize := 0
+	for _, t := range state.trees {
+		debugf("new tree check: cellIndex %d; mine: %t\n", t.cellIndex, t.isMine)
+		if !t.isMine {
+			continue
+		}
+		if t.size == 3 {
+			continue
+		}
+		if t.size > bestSize {
+			debugf("New best size %d on cell %d (was score %d cell %d)\n", t.size, t.cellIndex, bestSize, bestIx)
+			bestIx = t.cellIndex
+			bestSize = t.size
+		}
+	}
+
+	var res Command
+	if bestIx < state.field.numberOfCells+1 {
+		res = NewCmdGrow(bestIx)
+	}
+	debugf("greedy grow finish res=%+v", res)
+	return res
 }
 
 func main() {
@@ -195,8 +290,15 @@ func main() {
 		}
 		state := NewGameState(field, scanner)
 		debugf("new day; cells: %d, trees: %d\n", len(state.field.cells), len(state.trees))
-		greedyComplete(state)
+		c := greedyComplete(state)
+		if c == nil {
+			c = greedyGrow(state)
+			if c == nil {
+				c = NewCmdWait()
+			}
+		}
 
+		c.Do()
 		firstScan = false
 	}
 }
