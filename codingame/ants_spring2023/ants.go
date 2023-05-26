@@ -109,15 +109,28 @@ func main() {
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Buffer(make([]byte, 1000000), 1000000)
 	field := ScanNewField(scanner)
+
+	currentCrystalGoal := -1
 	for {
 		field.ScanNewTurn(scanner)
+
+		if currentCrystalGoal != -1 {
+			if field.cellsWithCrystals[currentCrystalGoal] == 0 {
+				currentCrystalGoal = -1
+			}
+		}
 		maxCrystalCellId := 0
 		maxCrystalCount := 0
-		for cellId, eggCount := range field.cellsWithCrystals {
-			if eggCount > maxCrystalCount {
-				maxCrystalCellId = cellId
-				maxCrystalCount = eggCount
+		if currentCrystalGoal == -1 {
+			for cellId, eggCount := range field.cellsWithCrystals {
+				if eggCount > maxCrystalCount {
+					maxCrystalCellId = cellId
+					maxCrystalCount = eggCount
+				}
 			}
+			currentCrystalGoal = maxCrystalCellId
+		} else {
+			maxCrystalCellId = currentCrystalGoal
 		}
 
 		printCmds(
