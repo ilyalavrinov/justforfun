@@ -126,7 +126,7 @@ func (f *Field) ScanNewTurn(scanner *bufio.Scanner) {
 	}
 }
 
-func bfsFindNearestResources(f *Field) (goals []*Cell, level int) {
+func bfsSortResources(f *Field) (goals []*Cell, level int) {
 	myBase := f.myBases[0]
 	nextLevel := myBase.neighbours
 	visited := make(map[int]bool, len(f.cells))
@@ -176,9 +176,24 @@ func main() {
 		field.ScanNewTurn(scanner)
 		var cmds []string
 
-		goals, _ := bfsFindNearestResources(&field)
+		goals, _ := bfsSortResources(&field)
+		maxGoals := 4
+		maxEggs := 1
+		curGoalCount := 0
+		curEggsCount := 0
 		for _, goal := range goals {
+			if goal.cellType == RESOURCE_EGG {
+				if curEggsCount >= maxEggs {
+					continue
+				} else {
+					curEggsCount++
+				}
+			}
 			cmds = append(cmds, cmdLine(field.myBases[0].index, goal.index, 1))
+			curGoalCount++
+			if curGoalCount >= maxGoals {
+				break
+			}
 		}
 		printCmds(cmds...)
 	}
