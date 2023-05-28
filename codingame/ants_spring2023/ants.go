@@ -154,7 +154,7 @@ func bfsFindNearestResources(f *Field) (goals []*Cell, level int) {
 		}
 	}
 
-	for len(goals) == 0 {
+	for len(nextLevel) > 0 {
 		level++
 		currentLevel := make([]*Cell, 0, len(nextLevel))
 		for _, n := range nextLevel {
