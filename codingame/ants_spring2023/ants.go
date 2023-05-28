@@ -172,26 +172,14 @@ func main() {
 	scanner.Buffer(make([]byte, 1000000), 1000000)
 	field := ScanNewField(scanner)
 
-	currentGoal := -1
 	for {
 		field.ScanNewTurn(scanner)
 		var cmds []string
 
-		if currentGoal != -1 {
-			if cell := field.cells[currentGoal]; cell.resourceCount == 0 {
-				currentGoal = -1
-			}
+		goals, _ := bfsFindNearestResources(&field)
+		for _, goal := range goals {
+			cmds = append(cmds, cmdLine(field.myBases[0].index, goal.index, 1))
 		}
-
-		if currentGoal == -1 {
-			goals, level := bfsFindNearestResources(&field)
-			currentGoal = goals[0].index
-			cmds = append(cmds, cmdMessage(fmt.Sprintf("GOALLEVEL %d", level)))
-		}
-
-		cmds = append(cmds,
-			cmdLine(field.myBases[0].index, currentGoal, 1),
-			cmdMessage(fmt.Sprintf("CURGOAL at %d", currentGoal)))
 		printCmds(cmds...)
 	}
 }
