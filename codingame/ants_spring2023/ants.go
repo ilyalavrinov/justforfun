@@ -184,28 +184,34 @@ func (f *Field) ScanNewTurn(scanner *bufio.Scanner) {
 	}
 }
 
+func (f *Field) cleanUpEmptyResources() bool {
+	result := false
+	for i, cell := range f.interestingCells {
+		if cell.resourceCount == 0 {
+			delete(f.interestingCells, i)
+			result = true
+		}
+	}
+	return result
+}
+
 func main() {
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Buffer(make([]byte, 1000000), 1000000)
 	field := ScanNewField(scanner)
 
-	currentGoals := make(map[int]int)
-
 	mst := calculateMST(&field)
-	var cmds []string
-	for from, tos := range mst {
-		for _, to := range tos {
-			cmds = append(cmds, cmdLine(from, to, 1))
-		}
-	}
 
 	for {
 		field.ScanNewTurn(scanner)
+		if field.cleanUpEmptyResources() {
+			mst = calculateMST(&field)
+		}
 
-		for cellIx := range currentGoals {
-			cell := field.cells[cellIx]
-			if cell.resourceCount == 0 {
-				delete(currentGoals, cellIx)
+		var cmds []string
+		for from, tos := range mst {
+			for _, to := range tos {
+				cmds = append(cmds, cmdLine(from, to, 1))
 			}
 		}
 
