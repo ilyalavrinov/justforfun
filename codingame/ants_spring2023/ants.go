@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -25,9 +26,11 @@ func cmdMessage(msg string) string {
 }
 
 const (
-	RESOURCE_NOTHING int = 0
-	RESOURCE_EGG     int = 1
-	RESOURCE_CRYSTAL int = 2
+	CELLTYPE_NOTHING int = 0
+	CELLTYPE_EGG     int = 1
+	CELLTYPE_CRYSTAL int = 2
+
+	CELLTYPE_MYBASE int = 10
 )
 
 type Cell struct {
@@ -48,8 +51,13 @@ type Field struct {
 	myBases    []*Cell
 	enemyBases []*Cell
 
+	interestingCells map[int]*Cell
+	distances        map[int]map[int]int
+
 	cellsWithCrystals []*Cell
 	cellsWithEggs     []*Cell
+
+	myAntsCount int
 }
 
 func ScanNewField(scanner *bufio.Scanner) Field {
@@ -61,6 +69,7 @@ func ScanNewField(scanner *bufio.Scanner) Field {
 	fmt.Sscan(scanner.Text(), &field.numberOfCells)
 
 	field.cells = make(map[int]*Cell, field.numberOfCells)
+	field.interestingCells = make(map[int]*Cell)
 	neighbourLists := make(map[int][]int)
 
 	for i := 0; i < field.numberOfCells; i++ {
@@ -78,10 +87,12 @@ func ScanNewField(scanner *bufio.Scanner) Field {
 		}
 		field.cells[i] = cell
 
-		if _type == RESOURCE_CRYSTAL {
+		if _type == CELLTYPE_CRYSTAL {
 			field.cellsWithCrystals = append(field.cellsWithCrystals, cell)
-		} else if _type == RESOURCE_EGG {
+			field.interestingCells[i] = cell
+		} else if _type == CELLTYPE_EGG {
 			field.cellsWithEggs = append(field.cellsWithEggs, cell)
+			field.interestingCells[i] = cell
 		}
 
 		neighbourLists[i] = append(neighbourLists[i], neigh0, neigh1, neigh2, neigh3, neigh4, neigh5)
@@ -106,6 +117,8 @@ func ScanNewField(scanner *bufio.Scanner) Field {
 	for i := 0; i < numberOfBases; i++ {
 		myBaseIndex, _ := strconv.ParseInt(inputs[i], 10, 32)
 		field.myBases = append(field.myBases, field.cells[int(myBaseIndex)])
+		field.cells[int(myBaseIndex)].cellType = CELLTYPE_MYBASE
+		field.interestingCells[int(myBaseIndex)] = field.cells[int(myBaseIndex)]
 	}
 	scanner.Scan()
 	inputs = strings.Split(scanner.Text(), " ")
@@ -114,7 +127,51 @@ func ScanNewField(scanner *bufio.Scanner) Field {
 		field.enemyBases = append(field.enemyBases, field.cells[int(oppBaseIndex)])
 	}
 
+	calcInterestingDistances(&field)
+
 	return field
+}
+
+func calcInterestingDistances(f *Field) {
+	f.distances = make(map[int]map[int]int)
+	for i := range f.interestingCells {
+		f.distances[i] = bfs(i, f)
+	}
+}
+
+func bfs(from int, f *Field) map[int]int {
+	cell := f.cells[from]
+	nextLevel := cell.neighbours
+	distances := make(map[int]int)
+	distances[from] = 0
+	dist := 1
+	for _, n := range nextLevel {
+		distances[n.index] = dist
+	}
+
+	calcDistBfs := func(frontier []*Cell) {
+		for _, cell := range frontier {
+			for _, n := range cell.neighbours {
+				if _, found := distances[n.index]; found {
+					continue
+				}
+				distances[n.index] = dist
+				nextLevel = append(nextLevel, n)
+			}
+		}
+	}
+
+	for len(nextLevel) > 0 {
+		dist++
+		currentLevel := make([]*Cell, 0, len(nextLevel))
+		for _, n := range nextLevel {
+			currentLevel = append(currentLevel, n)
+		}
+		nextLevel = make([]*Cell, 0)
+		calcDistBfs(currentLevel)
+	}
+
+	return distances
 }
 
 func (f *Field) ScanNewTurn(scanner *bufio.Scanner) {
@@ -123,48 +180,8 @@ func (f *Field) ScanNewTurn(scanner *bufio.Scanner) {
 
 		scanner.Scan()
 		fmt.Sscan(scanner.Text(), &cell.resourceCount, &cell.myAnts, &cell.oppAnts)
+		f.myAntsCount += cell.myAnts
 	}
-}
-
-func bfsSortResources(f *Field) (goals []*Cell, level int) {
-	myBase := f.myBases[0]
-	nextLevel := myBase.neighbours
-	visited := make(map[int]bool, len(f.cells))
-	visited[myBase.index] = true
-	for _, n := range nextLevel {
-		visited[n.index] = true
-	}
-
-	goals = make([]*Cell, 0)
-	level = 0
-
-	bfs := func(frontier []*Cell) {
-		for _, cell := range frontier {
-			if (cell.cellType == RESOURCE_CRYSTAL || cell.cellType == RESOURCE_EGG) && cell.resourceCount > 0 {
-				goals = append(goals, cell)
-			} else {
-				for _, n := range cell.neighbours {
-					if visited[n.index] {
-						continue
-					}
-					visited[n.index] = true
-					nextLevel = append(nextLevel, n)
-				}
-			}
-		}
-	}
-
-	for len(nextLevel) > 0 {
-		level++
-		currentLevel := make([]*Cell, 0, len(nextLevel))
-		for _, n := range nextLevel {
-			currentLevel = append(currentLevel, n)
-		}
-		nextLevel = make([]*Cell, 0)
-		bfs(currentLevel)
-	}
-
-	return
 }
 
 func main() {
@@ -172,29 +189,26 @@ func main() {
 	scanner.Buffer(make([]byte, 1000000), 1000000)
 	field := ScanNewField(scanner)
 
+	currentGoals := make(map[int]int)
+
+	mst := calculateMST(&field)
+	var cmds []string
+	for from, tos := range mst {
+		for _, to := range tos {
+			cmds = append(cmds, cmdLine(from, to, 1))
+		}
+	}
+
 	for {
 		field.ScanNewTurn(scanner)
-		var cmds []string
 
-		goals, _ := bfsSortResources(&field)
-		maxGoals := 4
-		maxEggs := 1
-		curGoalCount := 0
-		curEggsCount := 0
-		for _, goal := range goals {
-			if goal.cellType == RESOURCE_EGG {
-				if curEggsCount >= maxEggs {
-					continue
-				} else {
-					curEggsCount++
-				}
-			}
-			cmds = append(cmds, cmdLine(field.myBases[0].index, goal.index, 1))
-			curGoalCount++
-			if curGoalCount >= maxGoals {
-				break
+		for cellIx := range currentGoals {
+			cell := field.cells[cellIx]
+			if cell.resourceCount == 0 {
+				delete(currentGoals, cellIx)
 			}
 		}
+
 		printCmds(cmds...)
 	}
 }
@@ -205,4 +219,45 @@ func printCmds(cmds ...string) {
 		result = append(result, cmd)
 	}
 	fmt.Println(strings.Join(result, ";"))
+}
+
+func calculateMST(f *Field) map[int][]int {
+	unvisited := make(map[int]struct{}, len(f.interestingCells))
+	for _, cell := range f.interestingCells {
+		unvisited[cell.index] = struct{}{}
+	}
+	visited := make(map[int]struct{}, len(f.interestingCells)+len(f.myBases))
+	/*
+		for _, base := range f.myBases {
+			nodes = append(nodes, base)
+		}
+	*/
+	edges := make(map[int][]int)
+
+	newIteration := func() (int, int) {
+		minDist := math.MaxInt
+		bestFrom := -1
+		bestTo := -1
+		for from := range visited {
+			for to := range unvisited {
+				d := f.distances[from][to]
+				if d < minDist {
+					minDist = d
+					bestFrom = from
+					bestTo = to
+				}
+			}
+		}
+		return bestFrom, bestTo
+	}
+
+	visited[f.myBases[0].index] = struct{}{}
+	for len(unvisited) != 0 {
+		from, to := newIteration()
+		edges[from] = append(edges[from], to)
+		visited[to] = struct{}{}
+		delete(unvisited, to)
+	}
+
+	return edges
 }
