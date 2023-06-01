@@ -51,6 +51,9 @@ type Field struct {
 	myBases    []*Cell
 	enemyBases []*Cell
 
+	myScore  int
+	oppScore int
+
 	interestingCells map[int]*Cell
 	distances        map[int]map[int]int
 
@@ -175,6 +178,9 @@ func bfs(from int, f *Field) map[int]int {
 }
 
 func (f *Field) ScanNewTurn(scanner *bufio.Scanner) {
+	scanner.Scan()
+	fmt.Sscan(scanner.Text(), &f.myScore, &f.oppScore)
+
 	for i := 0; i < f.numberOfCells; i++ {
 		cell := f.cells[i]
 
@@ -257,7 +263,9 @@ func calculateMST(f *Field) map[int][]int {
 		return bestFrom, bestTo
 	}
 
-	visited[f.myBases[0].index] = struct{}{}
+	for _, base := range f.myBases {
+		visited[base.index] = struct{}{}
+	}
 	for len(unvisited) != 0 {
 		from, to := newIteration()
 		edges[from] = append(edges[from], to)
