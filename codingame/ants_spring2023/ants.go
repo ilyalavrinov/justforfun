@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -193,7 +194,7 @@ func (f *Field) ScanNewTurn(scanner *bufio.Scanner) {
 func (f *Field) cleanUpEmptyResources() bool {
 	result := false
 	for i, cell := range f.interestingCells {
-		if cell.resourceCount == 0 {
+		if (cell.cellType == CELLTYPE_CRYSTAL || cell.cellType == CELLTYPE_EGG) && cell.resourceCount == 0 {
 			delete(f.interestingCells, i)
 			result = true
 		}
@@ -208,27 +209,57 @@ func main() {
 
 	mst := calculateMST(&field)
 
+	firstGet := true
+
 	for {
 		field.ScanNewTurn(scanner)
 		if field.cleanUpEmptyResources() {
+			firstGet = false
 			mst = calculateMST(&field)
 		}
 
 		var cmds []string
-		for from, tos := range mst {
-			for _, to := range tos {
-				cmds = append(cmds, cmdLine(from, to, 1))
+		if !firstGet {
+			for from, tos := range mst {
+				for _, to := range tos {
+					cmds = append(cmds, cmdLine(from, to, 1))
+				}
+			}
+		} else {
+			for _, base := range field.myBases {
+				nodes := mst[base.index]
+				for _, index := range nodes {
+					if field.cells[index].cellType == CELLTYPE_EGG {
+						cmds = append(cmds, cmdLine(base.index, index, 1))
+					}
+				}
 			}
 		}
 
+		/*		if len(field.myBases) != 1 {
+					for from, tos := range mst {
+						for _, to := range tos {
+							cmds = append(cmds, cmdLine(from, to, 1))
+						}
+					}
+				} else {
+					//cmds = greedyLimitedGather(&field, mst)
+					cmds = longestChain(&field, mst)
+					cmds = append(cmds, cmdMessage("ONEBASE"))
+				}
+		*/
 		printCmds(cmds...)
 	}
 }
 
 func printCmds(cmds ...string) {
 	result := make([]string, 0, len(cmds))
-	for _, cmd := range cmds {
-		result = append(result, cmd)
+	if len(cmds) == 0 {
+		result = append(result, cmdWait())
+	} else {
+		for _, cmd := range cmds {
+			result = append(result, cmd)
+		}
 	}
 	fmt.Println(strings.Join(result, ";"))
 }
@@ -273,5 +304,96 @@ func calculateMST(f *Field) map[int][]int {
 		delete(unvisited, to)
 	}
 
-	return edges
+	edgesSorted := make(map[int][]int, len(edges))
+	for from, tos := range edges {
+		sort.Slice(tos, func(i, j int) bool {
+			return tos[i] < tos[j]
+		})
+		edgesSorted[from] = tos
+	}
+
+	return edgesSorted
+}
+
+func greedyLimitedGather(f *Field, mst map[int][]int) []string {
+	fromsToCheck := make(map[int]bool)
+	fromsToCheck[f.myBases[0].index] = true
+	remainingAnts := f.myAntsCount
+
+	iterate := func() (int, int, int) {
+		minDistFrom := -1
+		minDistTo := -1
+		minDist := math.MaxInt
+		for from := range fromsToCheck {
+			for _, to := range mst[from] {
+				if fromsToCheck[to] {
+					// already seen
+					continue
+				}
+				dist := f.distances[from][to]
+				if dist+1 > remainingAnts {
+					continue
+				}
+
+				if dist < minDist {
+					minDist = dist
+					minDistFrom = from
+					minDistTo = to
+				}
+			}
+		}
+		return minDistFrom, minDistTo, minDist
+	}
+
+	cmds := make([]string, 0)
+	for {
+		if len(cmds) >= 5 {
+			break
+		}
+		from, to, dist := iterate()
+		remainingAnts -= dist + 1
+		fromsToCheck[to] = true
+		if to == -1 {
+			break
+		}
+		cmds = append(cmds, cmdLine(from, to, 1))
+	}
+	return cmds
+}
+
+func longestChain(f *Field, mst map[int][]int) []string {
+	base := f.myBases[0].index
+	allPaths := dfs(base, mst, []int{base})
+
+	var longestPath []int
+	longestPathDist := 0
+	for _, path := range allPaths {
+		if len(path) > longestPathDist {
+			longestPathDist = len(path)
+			longestPath = path
+		}
+	}
+
+	cmds := make([]string, 0)
+	from := longestPath[0]
+	for i := 1; i < len(longestPath); i++ {
+		to := longestPath[i]
+		cmds = append(cmds, cmdLine(from, to, 1))
+		from = to
+	}
+	return cmds
+}
+
+func dfs(cur int, mst map[int][]int, curPath []int) [][]int {
+	nodes := mst[cur]
+	paths := make([][]int, 0)
+	if nodes != nil {
+		for _, node := range nodes {
+			newPath := append(curPath, node)
+			paths = append(paths, dfs(node, mst, newPath)...)
+		}
+	} else {
+		paths = [][]int{curPath}
+	}
+	return paths
 }
