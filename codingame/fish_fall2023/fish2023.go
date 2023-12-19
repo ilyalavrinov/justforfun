@@ -2,8 +2,15 @@ package main
 
 import (
 	"fmt"
+	"math"
+	"os"
+	"sort"
 	"strings"
 )
+
+func log(smth ...any) {
+	fmt.Fprintln(os.Stderr, smth...)
+}
 
 type creature struct {
 	id    int
@@ -42,11 +49,13 @@ type gameState struct {
 	myScore, oppScore int
 
 	myScans, oppScans   []int
+	myScansCreatureMap  map[int]struct{}
 	myDrones, oppDrones []drone
 
-	scans   []scanInfo
-	visible []visibleCreature
-	radars  []radarBlip
+	scans      []scanInfo
+	visible    []visibleCreature
+	visibleMap map[int]visibleCreature
+	radars     []radarBlip
 }
 
 func newState() *gameState {
@@ -59,17 +68,21 @@ func newState() *gameState {
 
 		state.creatures = append(state.creatures, creature{id, color, tipo})
 	}
+	log("new state")
 	return &state
 }
 
 func (s *gameState) reset() {
 	s.myScans = make([]int, 0, len(s.creatures))
+	s.myScansCreatureMap = make(map[int]struct{}, len(s.creatures))
 	s.oppScans = make([]int, 0, len(s.creatures))
 	s.myDrones = make([]drone, 0, len(s.myDrones))
 	s.oppDrones = make([]drone, 0, len(s.oppDrones))
 	s.scans = make([]scanInfo, 0, len(s.scans))
 	s.visible = make([]visibleCreature, 0, len(s.creatures))
+	s.visibleMap = make(map[int]visibleCreature, len(s.creatures))
 	s.radars = make([]radarBlip, 0, len(s.radars))
+	log("reset done")
 }
 
 func (s *gameState) readTurn() {
@@ -84,6 +97,7 @@ func (s *gameState) readTurn() {
 		var id int
 		fmt.Scan(&id)
 		s.myScans = append(s.myScans, id)
+		s.myScansCreatureMap[id] = struct{}{}
 	}
 	// opp
 	fmt.Scan(&scanCount)
@@ -122,6 +136,7 @@ func (s *gameState) readTurn() {
 		var vc visibleCreature
 		fmt.Scan(&vc.id, &vc.x, &vc.y, &vc.vx, &vc.vy)
 		s.visible = append(s.visible, vc)
+		s.visibleMap[vc.id] = vc
 	}
 
 	var radarBlipCount int
@@ -132,13 +147,70 @@ func (s *gameState) readTurn() {
 
 		s.radars = append(s.radars, blip)
 	}
+	log("read turn done")
+}
+
+const (
+	opMove = iota
+	opWait
+)
+
+type command struct {
+	droneId   int
+	operation int
+	toX, toY  int
+	light     bool
+}
+
+func (cmd *command) String() string {
+	var result string
+	light := 0
+	if cmd.light {
+		light = 1
+	}
+	if cmd.operation == opMove {
+		log("cmd move", cmd.droneId)
+		result = fmt.Sprintf("MOVE %d %d %d", cmd.toX, cmd.toY, light)
+	} else {
+		log("cmd wait", cmd.droneId)
+		result = fmt.Sprintf("WAIT %d", light)
+	}
+	return result
 }
 
 func (s *gameState) cmd() string {
+	rawCmds := make([]command, 0, len(s.myDrones))
+	alldists := sortVisibleByDroneDistance(s.myDrones, s.visible)
+	for droneId, dists := range alldists {
+		bestCreatureId := -1
+		for _, dist := range dists {
+			if _, found := s.myScansCreatureMap[dist.creatureId]; !found {
+				bestCreatureId = dist.creatureId
+				break
+			}
+		}
+
+		if bestCreatureId == -1 {
+			rawCmds = append(rawCmds, command{
+				droneId:   droneId,
+				operation: opWait,
+			})
+		} else {
+			rawCmds = append(rawCmds, command{
+				droneId:   droneId,
+				operation: opMove,
+				toX:       s.visibleMap[bestCreatureId].x,
+				toY:       s.visibleMap[bestCreatureId].y,
+			})
+		}
+	}
+
+	sort.Slice(rawCmds, func(i, j int) bool {
+		return rawCmds[i].droneId < rawCmds[j].droneId
+	})
 	var cmds []string
-	for i := 0; i < len(s.myDrones); i++ {
-		// fmt.Fprintln(os.Stderr, "Debug messages...")
-		cmds = append(cmds, "WAIT 0") // MOVE <x> <y> <light (1|0)> | WAIT <light (1|0)>
+	for _, c := range rawCmds {
+		cmds = append(cmds, c.String())
 	}
 	return strings.Join(cmds, " | ")
 }
@@ -150,4 +222,26 @@ func main() {
 		cmd := state.cmd()
 		fmt.Println(cmd)
 	}
+}
+
+type creatureDistance struct {
+	creatureId int
+	dist       float64
+}
+
+func sortVisibleByDroneDistance(drones []drone, creatures []visibleCreature) map[int][]creatureDistance {
+	result := make(map[int][]creatureDistance)
+	for _, d := range drones {
+		distances := make([]creatureDistance, 0)
+		for _, c := range creatures {
+			dist := math.Sqrt((float64(d.x-c.x) + (float64(d.y - c.y))))
+			distances = append(distances, creatureDistance{c.id, dist})
+		}
+		sort.Slice(distances, func(i, j int) bool {
+			return (distances[i].dist < distances[j].dist)
+		})
+		result[d.id] = distances
+	}
+	log("sort visible distance done", len(result))
+	return result
 }
