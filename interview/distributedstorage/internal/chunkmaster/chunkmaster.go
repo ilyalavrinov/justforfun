@@ -1,6 +1,10 @@
 package chunkmaster
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/ilyalavrinov/justforfun/interview/distributedstorage/internal/storage"
+)
 
 type Chunk struct {
 	Order             int32
@@ -18,7 +22,11 @@ var (
 )
 
 type ChunkMaster interface {
-	NodeUp(fqdn string)
+	// node registry - TODO move it away?
+	NodeUp(fqdn string, storage storage.Storage)
+	Storages() map[string]storage.Storage
+
+	// splitting functionality
 	SplitToChunks(filepath string, size int64) ([]Chunk, error)
 	ChunksToRestore(filepath string) ([]Chunk, error)
 }

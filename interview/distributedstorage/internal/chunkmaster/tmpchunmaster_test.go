@@ -11,7 +11,7 @@ import (
 func newReadyForTestTmpChunker(numberOfChunks int) ChunkMaster {
 	chunker := NewTemporaryChunkMaster(numberOfChunks)
 	for i := range numberOfChunks {
-		chunker.NodeUp(fmt.Sprintf("node_%d", i))
+		chunker.NodeUp(fmt.Sprintf("node_%d", i), nil)
 	}
 	return chunker
 }
@@ -19,7 +19,7 @@ func newReadyForTestTmpChunker(numberOfChunks int) ChunkMaster {
 func TestNotEnoughStorageHosts(t *testing.T) {
 	chunker := NewTemporaryChunkMaster(6)
 	for i := range 5 {
-		chunker.NodeUp(fmt.Sprintf("node_%d", i))
+		chunker.NodeUp(fmt.Sprintf("node_%d", i), nil)
 	}
 	chunks, err := chunker.SplitToChunks("some/path", 9000)
 	assert.Nil(t, chunks)
@@ -66,4 +66,30 @@ func TestSplitData(t *testing.T) {
 		nextExpectedOrder++
 	}
 	assert.EqualValues(t, 9007, sumChunks)
+}
+
+func TestDuplicatesNotAllowed(t *testing.T) {
+	chunker := newReadyForTestTmpChunker(6)
+	filepath := "same/path"
+	chunks, err := chunker.SplitToChunks(filepath, 9007)
+	require.NoError(t, err)
+	assert.Len(t, chunks, 6)
+	_, err = chunker.SplitToChunks(filepath, 1035)
+	require.ErrorIs(t, err, ErrFileDuplicate)
+}
+
+func TestSplitAndRetrieve(t *testing.T) {
+	chunker := newReadyForTestTmpChunker(6)
+	filepath := "this/is/my/path123"
+	chunksSplit, err := chunker.SplitToChunks(filepath, 54623)
+	require.NoError(t, err)
+	chunksRestore, err := chunker.ChunksToRestore(filepath)
+	require.NoError(t, err)
+	require.EqualValues(t, chunksSplit, chunksRestore)
+}
+
+func TestFileNotFound(t *testing.T) {
+	chunker := newReadyForTestTmpChunker(6)
+	_, err := chunker.ChunksToRestore("abc/3424/ty")
+	require.ErrorIs(t, err, ErrFileNotFound)
 }

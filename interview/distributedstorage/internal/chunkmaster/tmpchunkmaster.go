@@ -1,9 +1,13 @@
 package chunkmaster
 
-import "math/rand/v2"
+import (
+	"math/rand/v2"
+
+	"github.com/ilyalavrinov/justforfun/interview/distributedstorage/internal/storage"
+)
 
 type TemporaryChunkMaster struct {
-	knownStorages map[string]bool
+	knownStorages map[string]storage.Storage
 	chunkCatalog  map[string][]Chunk
 
 	splitNumber int
@@ -13,20 +17,27 @@ var _ ChunkMaster = (*TemporaryChunkMaster)(nil)
 
 func NewTemporaryChunkMaster(chunkSplitNumber int) ChunkMaster {
 	return &TemporaryChunkMaster{
-		knownStorages: make(map[string]bool),
+		knownStorages: make(map[string]storage.Storage),
 		chunkCatalog:  make(map[string][]Chunk),
 		splitNumber:   chunkSplitNumber,
 	}
 }
 
-func (tmp *TemporaryChunkMaster) NodeUp(fqdn string) {
-	tmp.knownStorages[fqdn] = true
+func (tmp *TemporaryChunkMaster) NodeUp(fqdn string, storage storage.Storage) {
+	tmp.knownStorages[fqdn] = storage
+}
+
+func (tmp *TemporaryChunkMaster) Storages() map[string]storage.Storage {
+	return tmp.knownStorages
 }
 
 func (tmp *TemporaryChunkMaster) SplitToChunks(filepath string, size int64) ([]Chunk, error) {
-	// equal dumb strategy here just for first version
 	if len(tmp.knownStorages) < tmp.splitNumber {
 		return nil, ErrNotEnoughStorageNodes
+	}
+
+	if _, found := tmp.chunkCatalog[filepath]; found {
+		return nil, ErrFileDuplicate
 	}
 
 	storages := make([]string, 0, tmp.splitNumber)
@@ -57,6 +68,7 @@ func (tmp *TemporaryChunkMaster) SplitToChunks(filepath string, size int64) ([]C
 		})
 	}
 	chunks[len(chunks)-1].Size = size - (chunkSize * int64(tmp.splitNumber-1))
+	tmp.chunkCatalog[filepath] = chunks
 
 	return chunks, nil
 }

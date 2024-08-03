@@ -17,6 +17,7 @@ This code assumes that all filenames are located in the same flat space, i.e. th
 * Premature ending of sending by user - clean up the data
 * Storage down detection during uploading/downloading - clean up the data (recovery and faster detection in production version I'm not doing here)
 * (?) We don't actually need size or any equal splitting. We can split to chunks as we read the data, sending a new chunk to new storage and then changing storage by asking for a new chunk quota.
+* Race conditions on multiple Get/Post/commbination
 
 ## What I would do in an Ideal Super Final version
 
@@ -26,4 +27,4 @@ This code assumes that all filenames are located in the same flat space, i.e. th
 * Support for DELETE
 * Autoscaling (?)
 * Scalable external-facing API service with access via load balancer
-* Multiple API services - more elaborate Chunk Master. No concrete thoughts how would I design it for now
+* If API services are scalable then I need more elaborate Chunk Master. No concrete thoughts how would I design it for now. Maybe it should be a standalone service. Maybe data still part of API service but with data replication between all of them
