@@ -6,28 +6,28 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"math/rand"
 	"os"
 	"path"
 )
 
-// saves stuff to local /tmp
-type TmpStorage struct {
+type localStorage struct {
 	rootDir string
 }
 
-var _ Storage = (*TmpStorage)(nil)
+var _ Storage = (*localStorage)(nil)
 
-func NewTmpStorage() Storage {
-	tmpdir, err := os.MkdirTemp(os.TempDir(), "diststorage-")
+func NewLocalStorage(saveDir string) (Storage, error) {
+	err := os.MkdirAll(saveDir, 0o700)
 	if err != nil {
-		panic(fmt.Sprintf("cannot create temp storage: %s", err))
+		return nil, err
 	}
-	return &TmpStorage{
-		rootDir: tmpdir,
-	}
+	return &localStorage{
+		rootDir: saveDir,
+	}, nil
 }
 
-func (ts *TmpStorage) AcceptChunk(filepath string, reader io.Reader) error {
+func (ts *localStorage) AcceptChunk(filepath string, reader io.Reader) error {
 	fullpath := path.Join(ts.rootDir, filepath)
 	_, err := os.Stat(fullpath)
 	if err == nil || !errors.Is(err, os.ErrNotExist) {
@@ -49,7 +49,7 @@ func (ts *TmpStorage) AcceptChunk(filepath string, reader io.Reader) error {
 	return err
 }
 
-func (ts *TmpStorage) RetrieveChunk(filepath string, writer io.Writer) error {
+func (ts *localStorage) RetrieveChunk(filepath string, writer io.Writer) error {
 	fullpath := path.Join(ts.rootDir, filepath)
 
 	f, err := os.Open(fullpath)
@@ -60,4 +60,14 @@ func (ts *TmpStorage) RetrieveChunk(filepath string, writer io.Writer) error {
 	written, err := io.Copy(writer, f)
 	slog.Info("retrieve chunk done", "fullpath", fullpath, "written", written)
 	return err
+}
+
+// creates a new directory in /tmp. Panics if something is wrong
+func NewTmpStorage() Storage {
+	tmpdir := path.Join(os.TempDir(), fmt.Sprintf("diststorage-%d", 100000+rand.Intn(100000)))
+	storage, err := NewLocalStorage(tmpdir)
+	if err != nil {
+		panic(fmt.Sprintf("cannot create temp storage: %s", err))
+	}
+	return storage
 }
