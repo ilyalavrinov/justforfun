@@ -6,18 +6,28 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 
 	"github.com/ilyalavrinov/justforfun/interview/distributedstorage/internal/chunkmaster"
 	"github.com/ilyalavrinov/justforfun/interview/distributedstorage/internal/storage"
 )
 
 func main() {
-	chunkMaster := chunkmaster.NewTemporaryChunkMaster(6)
-
-	for i := range 6 {
-		tempStorage := storage.NewTmpStorage()
-		chunkMaster.NodeUp(fmt.Sprintf("tmpnode_%d", i), tempStorage)
+	chunkMaster := chunkmaster.NewTemporaryChunkMaster(2)
+	addr1 := "localhost:45001"
+	remote1, err := storage.NewRemoteStorage(addr1)
+	if err != nil {
+		slog.Error("cannot connect to remote1", "err", err)
+		os.Exit(1)
 	}
+	addr2 := "localhost:45002"
+	remote2, err := storage.NewRemoteStorage(addr2)
+	if err != nil {
+		slog.Error("cannot connect to remote2", "err", err)
+		os.Exit(1)
+	}
+	chunkMaster.NodeUp(addr1, remote1)
+	chunkMaster.NodeUp(addr2, remote2)
 
 	retriever := &retrieveHandler{chunkMaster: chunkMaster}
 	storer := &storeHandler{chunkMaster: chunkMaster}
@@ -26,7 +36,7 @@ func main() {
 	http.Handle("POST /{filepath}", storer)
 
 	slog.Info("apiservice started")
-	err := http.ListenAndServe("", nil)
+	err = http.ListenAndServe("", nil)
 	if err != nil {
 		slog.Error("server exit with error", "err", err)
 	}
@@ -69,7 +79,7 @@ func distributeData(ctx context.Context, body io.Reader, filepath string, chunks
 			return fmt.Errorf("storage instance %s missing", chunk.StorageInstance)
 		}
 		chunkReader := io.LimitReader(body, chunk.Size)
-		err := storage.AcceptChunk(chunkId(filepath, chunk.Order), chunkReader)
+		err := storage.AcceptChunk(ctx, chunkId(filepath, chunk.Order), chunkReader)
 		if err != nil {
 			rollbackSave(ctx)
 			return fmt.Errorf("cannot save chunk %d on instance %s with error: %w", chunk.Order, chunk.StorageInstance, err)
@@ -118,7 +128,7 @@ func reconstructData(ctx context.Context, filepath string, chunks []chunkmaster.
 			return fmt.Errorf("storage instance %s missing", chunk.StorageInstance)
 		}
 
-		err := storage.RetrieveChunk(chunkId(filepath, chunk.Order), writer)
+		err := storage.RetrieveChunk(ctx, chunkId(filepath, chunk.Order), writer)
 		if err != nil {
 			return fmt.Errorf("cannot retrieve chunk %d on instance %s with error: %w", chunk.Order, chunk.StorageInstance, err)
 		}

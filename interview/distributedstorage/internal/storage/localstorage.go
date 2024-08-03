@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -27,7 +28,7 @@ func NewLocalStorage(saveDir string) (Storage, error) {
 	}, nil
 }
 
-func (ts *localStorage) AcceptChunk(filepath string, reader io.Reader) error {
+func (ts *localStorage) AcceptChunk(_ context.Context, filepath string, reader io.Reader) error {
 	fullpath := path.Join(ts.rootDir, filepath)
 	_, err := os.Stat(fullpath)
 	if err == nil || !errors.Is(err, os.ErrNotExist) {
@@ -49,7 +50,7 @@ func (ts *localStorage) AcceptChunk(filepath string, reader io.Reader) error {
 	return err
 }
 
-func (ts *localStorage) RetrieveChunk(filepath string, writer io.Writer) error {
+func (ts *localStorage) RetrieveChunk(_ context.Context, filepath string, writer io.Writer) error {
 	fullpath := path.Join(ts.rootDir, filepath)
 
 	f, err := os.Open(fullpath)

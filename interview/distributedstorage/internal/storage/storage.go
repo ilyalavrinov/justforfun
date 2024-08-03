@@ -1,8 +1,11 @@
 package storage
 
-import "io"
+import (
+	"context"
+	"io"
+)
 
 type Storage interface {
-	AcceptChunk(string, io.Reader) error
-	RetrieveChunk(string, io.Writer) error
+	AcceptChunk(context.Context, string, io.Reader) error
+	RetrieveChunk(context.Context, string, io.Writer) error
 }

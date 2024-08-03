@@ -74,6 +74,6 @@ func newStorageServer(storageLocation string) (*storageServer, error) {
 func (ssrv *storageServer) StoreData(ctx context.Context, in *pb.StoredUnit) (*emptypb.Empty, error) {
 	filename := fmt.Sprintf("%s.part.%d", in.GetFileId(), in.GetChunkId())
 	reader := bytes.NewReader(in.GetData())
-	err := ssrv.storage.AcceptChunk(filename, reader)
+	err := ssrv.storage.AcceptChunk(ctx, filename, reader)
 	return nil, err
 }

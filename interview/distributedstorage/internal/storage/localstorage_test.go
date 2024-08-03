@@ -2,6 +2,7 @@ package storage
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"io/fs"
 	"testing"
@@ -18,11 +19,12 @@ func TestTempStorageSendRetrieve(t *testing.T) {
 	reader := bytes.NewReader(randdata)
 
 	filename := "this/is/my/file1"
-	err := storage.AcceptChunk(filename, reader)
+	ctx := context.Background()
+	err := storage.AcceptChunk(ctx, filename, reader)
 	require.NoError(t, err)
 
 	var retrieved bytes.Buffer
-	err = storage.RetrieveChunk(filename, &retrieved)
+	err = storage.RetrieveChunk(ctx, filename, &retrieved)
 	require.NoError(t, err)
 
 	assert.EqualValues(t, randdata, retrieved.Bytes())
@@ -36,16 +38,18 @@ func TestTempStorageSendTwice(t *testing.T) {
 	reader := bytes.NewReader(randdata1)
 
 	filename := "this/is/my/file2"
-	err := storage.AcceptChunk(filename, reader)
+	ctx := context.Background()
+	err := storage.AcceptChunk(ctx, filename, reader)
 	require.NoError(t, err)
-	err = storage.AcceptChunk(filename, reader)
+	err = storage.AcceptChunk(ctx, filename, reader)
 	assert.Error(t, err)
 }
 
 func TestTempStorageTryRetrieveAbsent(t *testing.T) {
 	storage := NewTmpStorage()
 
+	ctx := context.Background()
 	var retrieved bytes.Buffer
-	err := storage.RetrieveChunk("hello/this/is/patrick", &retrieved)
+	err := storage.RetrieveChunk(ctx, "hello/this/is/patrick", &retrieved)
 	require.ErrorIs(t, err, fs.ErrNotExist)
 }
