@@ -5,7 +5,8 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log/slog"
-	"math/rand/v2"
+	"math"
+	"sort"
 	"sync"
 
 	pb "github.com/ilyalavrinov/justforfun/interview/distributedstorage/internal/proto/storageinventory"
@@ -13,12 +14,17 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
+type storageMeta struct {
+	storageID      string
+	storage        storage.Storage
+	availableBytes int64
+}
+
 type TemporaryChunkMaster struct {
 	// storage inventory
 	pb.UnsafeStorageInventoryServer
 	storageMutex   sync.RWMutex
-	storages       map[string]storage.Storage
-	storageMem     map[string]int64
+	storages       map[string]*storageMeta
 	storageCreator ConnectStorageFunc
 
 	// chunky logic
@@ -34,8 +40,7 @@ type ConnectStorageFunc func(string) (storage.Storage, error)
 
 func NewTemporaryChunkMaster(chunkSplitNumber int, connectFunc ConnectStorageFunc) ChunkMaster {
 	return &TemporaryChunkMaster{
-		storages:       make(map[string]storage.Storage),
-		storageMem:     make(map[string]int64),
+		storages:       make(map[string]*storageMeta),
 		storageCreator: connectFunc,
 		chunkCatalog:   make(map[string][]Chunk),
 		splitNumber:    chunkSplitNumber,
@@ -47,7 +52,7 @@ func (cm *TemporaryChunkMaster) Storages() map[string]storage.Storage {
 	defer cm.storageMutex.RUnlock()
 	res := make(map[string]storage.Storage, len(cm.storages))
 	for id, storage := range cm.storages {
-		res[id] = storage
+		res[id] = storage.storage
 	}
 	return res
 }
@@ -65,19 +70,21 @@ func (cm *TemporaryChunkMaster) SplitToChunks(filepath string, size int64) ([]Ch
 		return nil, ErrFileDuplicate
 	}
 
-	storages := make([]string, 0, cm.splitNumber)
-	for fqdn := range cm.storages {
-		storages = append(storages, fqdn)
-	}
-	// TODO: do something better like greedy approach, or other better distribution
-	rand.Shuffle(cm.splitNumber, func(i, j int) {
-		storages[i], storages[j] = storages[j], storages[i]
-	})
+	cm.storageMutex.Lock() // TODO: 2 mutexes taken at the same time are bad.
+	defer cm.storageMutex.Unlock()
 
+	prioritizedIds := prioritizeStorages(cm.storages)
+
+	// special case when we cannot split even by 1 byte to each storage
 	if size < int64(cm.splitNumber) {
+		targetStorageId := prioritizedIds[0]
+		availMem := cm.storages[targetStorageId].availableBytes
+		if availMem < size {
+			return nil, ErrNotEnoughAvailableStorage
+		}
 		return []Chunk{{
 			Order:             0,
-			StorageInstance:   storages[0],
+			StorageInstance:   targetStorageId,
 			OriginalFileStart: 0,
 			Size:              size,
 		}}, nil
@@ -88,16 +95,50 @@ func (cm *TemporaryChunkMaster) SplitToChunks(filepath string, size int64) ([]Ch
 	for i := range cm.splitNumber {
 		chunks = append(chunks, Chunk{
 			Order:             int32(i),
-			StorageInstance:   storages[i],
+			StorageInstance:   prioritizedIds[i],
 			OriginalFileStart: int64(i) * chunkSize,
 			Size:              chunkSize,
 			FileId:            fmt.Sprintf("%s.part.%d", fullFileId, i),
 		})
 	}
 	chunks[len(chunks)-1].Size = size - (chunkSize * int64(cm.splitNumber-1))
+
+	// checking that we have enough memory
+	isAllMemGood := true
+	for _, chunk := range chunks {
+		storageAvailable := cm.storages[chunk.StorageInstance].availableBytes
+		if storageAvailable < chunk.Size {
+			isAllMemGood = false
+		}
+	}
+	if !isAllMemGood {
+		return nil, ErrNotEnoughAvailableStorage
+	}
+
+	// all good, reserve quota! iterating again, this chunky function is so ugly
+	for _, chunk := range chunks {
+		cm.storages[chunk.StorageInstance].availableBytes -= chunk.Size
+	}
+
 	cm.chunkCatalog[fullFileId] = chunks
 
 	return chunks, nil
+}
+
+func prioritizeStorages(storages map[string]*storageMeta) []string {
+	list := make([]*storageMeta, 0, len(storages))
+	for _, meta := range storages {
+		list = append(list, meta)
+	}
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].availableBytes > list[j].availableBytes
+	})
+
+	ids := make([]string, 0, len(list))
+	for _, meta := range list {
+		ids = append(ids, meta.storageID)
+	}
+	return ids
 }
 
 func (cm *TemporaryChunkMaster) ChunksToRestore(filepath string) ([]Chunk, error) {
@@ -121,16 +162,28 @@ func (cm *TemporaryChunkMaster) UpdateStorageInfo(_ context.Context, info *pb.St
 	defer cm.storageMutex.Unlock()
 
 	storageID := info.GetIam()
-	_, found := cm.storages[storageID]
+	meta, found := cm.storages[storageID]
 	if !found {
 		rs, err := cm.storageCreator(storageID)
 		if err != nil {
 			slog.Error("cannot add new storage", "storage_id", storageID, "err", err)
 			return nil, err
 		}
-		cm.storages[storageID] = rs
+		meta = &storageMeta{
+			storageID:      storageID,
+			storage:        rs,
+			availableBytes: math.MaxInt64,
+		}
+		cm.storages[storageID] = meta
 		slog.Info("added new storage", "storage_id", storageID)
 	}
-	cm.storageMem[storageID] = info.GetAvailableBytes()
+	availBytesNow := meta.availableBytes
+	slog.Info("heartbeat received", "from", storageID, "available_bytes_received", info.GetAvailableBytes(), "available_bytes_known", availBytesNow)
+	// TODO: here we'll be getting a race condition when a chunk is being uploaded/removed, which can easily lead to overbooking of space.
+	// But it should self-recover! ..probably.
+	// Using our quotation calculation should be prevailing over what we have reported from host if we detect shortage
+	if info.GetAvailableBytes() < availBytesNow {
+		meta.availableBytes = info.GetAvailableBytes()
+	}
 	return nil, nil
 }

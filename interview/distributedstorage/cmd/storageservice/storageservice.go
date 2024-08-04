@@ -13,6 +13,7 @@ import (
 	storagepb "github.com/ilyalavrinov/justforfun/interview/distributedstorage/internal/proto/storage"
 	inventorypb "github.com/ilyalavrinov/justforfun/interview/distributedstorage/internal/proto/storageinventory"
 	"github.com/ilyalavrinov/justforfun/interview/distributedstorage/internal/storage"
+	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -39,7 +40,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	go runHeartbeatSender(fmt.Sprintf("%s:%d", hostname, *argPort), *argInventoryHost)
+	go runHeartbeatSender(fmt.Sprintf("%s:%d", hostname, *argPort), *argStorageLocation, *argInventoryHost)
 
 	err = runServer(*argStorageLocation, *argPort)
 	if err != nil {
@@ -102,7 +103,7 @@ func (ssrv *storageServer) RetrieveData(ctx context.Context, in *storagepb.FileI
 	return unit, nil
 }
 
-func runHeartbeatSender(iam, inventoryServerAddr string) {
+func runHeartbeatSender(iam, storageDir, inventoryServerAddr string) {
 	ticker := time.NewTicker(10 * time.Second)
 	for {
 		<-ticker.C
@@ -111,17 +112,25 @@ func runHeartbeatSender(iam, inventoryServerAddr string) {
 			slog.Error("storage inventory cannot connect", "err", err)
 			continue
 		}
+
+		var stats unix.Statfs_t
+		err = unix.Statfs(storageDir, &stats)
+		if err != nil {
+			slog.Error("cannot stat storage dir: %w", err)
+		}
+		availableBytes := int64(stats.Bavail) * int64(stats.Bsize)
+
 		client := inventorypb.NewStorageInventoryClient(conn)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		info := &inventorypb.StorageInfo{
 			Iam:            iam,
-			AvailableBytes: 0,
+			AvailableBytes: availableBytes,
 		}
 		_, err = client.UpdateStorageInfo(ctx, info)
 		if err != nil {
 			slog.Error("cannot update storage info", "err", err)
 		}
 		cancel()
-		slog.Info("heartbeat successfully sent", "iam", iam, "to", inventoryServerAddr)
+		slog.Info("heartbeat successfully sent", "iam", iam, "to", inventoryServerAddr, "available_bytes", availableBytes)
 	}
 }

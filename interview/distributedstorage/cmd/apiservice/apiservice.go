@@ -120,7 +120,7 @@ func distributeData(ctx context.Context, body io.Reader, chunks []chunkmaster.Ch
 }
 
 func rollbackSave(ctx context.Context) {
-	panic("TODO implement it")
+	// panic("TODO implement it")
 }
 
 type retrieveHandler struct {
