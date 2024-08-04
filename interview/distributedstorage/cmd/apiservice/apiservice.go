@@ -18,13 +18,18 @@ import (
 
 func main() {
 	argInventoryPort := flag.Int("inventory-port", 3609, "port where we listen for grpc info about storages")
+	argChunksNum := flag.Int("chunks-num", 6, "number of chunks to split incoming file")
 	flag.Parse()
 	if *argInventoryPort <= 0 {
 		slog.Error("inventory port is bad", "port", *argInventoryPort)
 		os.Exit(1)
 	}
+	if *argChunksNum <= 0 {
+		slog.Error("nunmber of chunks is bad", "port", *argChunksNum)
+		os.Exit(1)
+	}
 
-	chunkMaster, err := startChunkMaster(*argInventoryPort)
+	chunkMaster, err := startChunkMaster(*argInventoryPort, *argChunksNum)
 	if err != nil {
 		slog.Error("cannot start chunk master", "err", err)
 		os.Exit(1)
@@ -43,11 +48,11 @@ func main() {
 	}
 }
 
-func startChunkMaster(storageInventoryPort int) (chunkmaster.ChunkMaster, error) {
+func startChunkMaster(storageInventoryPort int, chunksNum int) (chunkmaster.ChunkMaster, error) {
 	connectToRemoteStorage := func(storageId string) (storage.Storage, error) {
 		return storage.NewRemoteStorage(storageId)
 	}
-	chunkMaster := chunkmaster.NewTemporaryChunkMaster(2, connectToRemoteStorage)
+	chunkMaster := chunkmaster.NewTemporaryChunkMaster(chunksNum, connectToRemoteStorage)
 
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", storageInventoryPort))
 	if err != nil {
