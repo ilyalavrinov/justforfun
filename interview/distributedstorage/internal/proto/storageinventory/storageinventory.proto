@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package storage;
+option go_package = "github.com/ilyalavrinov/justforfun/interview/distributedstorage/internal/proto/storageinventory";
+import "google/protobuf/empty.proto";
+
+message StorageInfo {
+    string iam = 1;
+    int64 available_bytes = 2;
+}
+
+service StorageInventory {
+    rpc UpdateStorageInfo (StorageInfo) returns (google.protobuf.Empty) {};
+}

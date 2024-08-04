@@ -1,25 +1,42 @@
 package chunkmaster
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
+	pb "github.com/ilyalavrinov/justforfun/interview/distributedstorage/internal/proto/storageinventory"
+	"github.com/ilyalavrinov/justforfun/interview/distributedstorage/internal/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
+func addNilStorage(_ string) (storage.Storage, error) {
+	return nil, nil
+}
+
 func newReadyForTestTmpChunker(numberOfChunks int) ChunkMaster {
-	chunker := NewTemporaryChunkMaster(numberOfChunks)
+	chunker := NewTemporaryChunkMaster(numberOfChunks, addNilStorage)
+	cm := chunker.(*TemporaryChunkMaster)
 	for i := range numberOfChunks {
-		chunker.NodeUp(fmt.Sprintf("node_%d", i), nil)
+		nodeInfo := &pb.StorageInfo{
+			Iam:            fmt.Sprintf("tempstorage-%d", i),
+			AvailableBytes: 0,
+		}
+		cm.UpdateStorageInfo(context.Background(), nodeInfo)
 	}
 	return chunker
 }
 
 func TestNotEnoughStorageHosts(t *testing.T) {
-	chunker := NewTemporaryChunkMaster(6)
+	chunker := NewTemporaryChunkMaster(6, addNilStorage)
+	cm := chunker.(*TemporaryChunkMaster)
 	for i := range 5 {
-		chunker.NodeUp(fmt.Sprintf("node_%d", i), nil)
+		nodeInfo := &pb.StorageInfo{
+			Iam:            fmt.Sprintf("tempstorage-%d", i),
+			AvailableBytes: 0,
+		}
+		cm.UpdateStorageInfo(context.Background(), nodeInfo)
 	}
 	chunks, err := chunker.SplitToChunks("some/path", 9000)
 	assert.Nil(t, chunks)

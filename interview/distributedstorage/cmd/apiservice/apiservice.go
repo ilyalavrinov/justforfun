@@ -2,32 +2,33 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 
 	"github.com/ilyalavrinov/justforfun/interview/distributedstorage/internal/chunkmaster"
+	pb "github.com/ilyalavrinov/justforfun/interview/distributedstorage/internal/proto/storageinventory"
 	"github.com/ilyalavrinov/justforfun/interview/distributedstorage/internal/storage"
+	"google.golang.org/grpc"
 )
 
 func main() {
-	chunkMaster := chunkmaster.NewTemporaryChunkMaster(2)
-	addr1 := "localhost:45001"
-	remote1, err := storage.NewRemoteStorage(addr1)
-	if err != nil {
-		slog.Error("cannot connect to remote1", "err", err)
+	argInventoryPort := flag.Int("inventory-port", 3609, "port where we listen for grpc info about storages")
+	flag.Parse()
+	if *argInventoryPort <= 0 {
+		slog.Error("inventory port is bad", "port", *argInventoryPort)
 		os.Exit(1)
 	}
-	addr2 := "localhost:45002"
-	remote2, err := storage.NewRemoteStorage(addr2)
+
+	chunkMaster, err := startChunkMaster(*argInventoryPort)
 	if err != nil {
-		slog.Error("cannot connect to remote2", "err", err)
+		slog.Error("cannot start chunk master", "err", err)
 		os.Exit(1)
 	}
-	chunkMaster.NodeUp(addr1, remote1)
-	chunkMaster.NodeUp(addr2, remote2)
 
 	retriever := &retrieveHandler{chunkMaster: chunkMaster}
 	storer := &storeHandler{chunkMaster: chunkMaster}
@@ -40,6 +41,30 @@ func main() {
 	if err != nil {
 		slog.Error("server exit with error", "err", err)
 	}
+}
+
+func startChunkMaster(storageInventoryPort int) (chunkmaster.ChunkMaster, error) {
+	connectToRemoteStorage := func(storageId string) (storage.Storage, error) {
+		return storage.NewRemoteStorage(storageId)
+	}
+	chunkMaster := chunkmaster.NewTemporaryChunkMaster(2, connectToRemoteStorage)
+
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", storageInventoryPort))
+	if err != nil {
+		return nil, fmt.Errorf("listen for chunkmaster failed: %w", err)
+	}
+	gsrv := grpc.NewServer()
+	pb.RegisterStorageInventoryServer(gsrv, chunkMaster)
+
+	go func() {
+		slog.Info("inventory service listening", "port", storageInventoryPort)
+		if err := gsrv.Serve(listener); err != nil {
+			slog.Error("cannot serve grpc for chunkmaster", "err", err)
+			os.Exit(2)
+		}
+	}()
+
+	return chunkMaster, nil
 }
 
 type storeHandler struct {
