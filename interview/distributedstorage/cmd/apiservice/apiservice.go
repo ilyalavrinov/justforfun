@@ -57,7 +57,7 @@ func (h *storeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	ctx := req.Context()
-	err = distributeData(ctx, req.Body, filepath, chunks, h.chunkMaster.Storages())
+	err = distributeData(ctx, req.Body, chunks, h.chunkMaster.Storages())
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		slog.Error("data distribution error", "err", err, "filepath", filepath)
@@ -67,7 +67,7 @@ func (h *storeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func distributeData(ctx context.Context, body io.Reader, filepath string, chunks []chunkmaster.Chunk, storages map[string]storage.Storage) error {
+func distributeData(ctx context.Context, body io.Reader, chunks []chunkmaster.Chunk, storages map[string]storage.Storage) error {
 	for i, chunk := range chunks {
 		if i != int(chunk.Order) {
 			panic("chunks are not ordered")
@@ -78,8 +78,9 @@ func distributeData(ctx context.Context, body io.Reader, filepath string, chunks
 			rollbackSave(ctx)
 			return fmt.Errorf("storage instance %s missing", chunk.StorageInstance)
 		}
+		// I don't think it is worth paralleling things here. Concurrent execution would help only if access to our storages is a bottleneck
 		chunkReader := io.LimitReader(body, chunk.Size)
-		err := storage.AcceptChunk(ctx, chunkId(filepath, chunk.Order), chunkReader)
+		err := storage.StoreChunk(ctx, chunk.FileId, chunkReader)
 		if err != nil {
 			rollbackSave(ctx)
 			return fmt.Errorf("cannot save chunk %d on instance %s with error: %w", chunk.Order, chunk.StorageInstance, err)
@@ -107,7 +108,7 @@ func (h *retrieveHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	ctx := req.Context()
-	err = reconstructData(ctx, filepath, chunks, h.chunkMaster.Storages(), w)
+	err = reconstructData(ctx, chunks, h.chunkMaster.Storages(), w)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		slog.Error("data distribution error", "err", err, "filepath", filepath)
@@ -117,7 +118,7 @@ func (h *retrieveHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func reconstructData(ctx context.Context, filepath string, chunks []chunkmaster.Chunk, storages map[string]storage.Storage, writer io.Writer) error {
+func reconstructData(ctx context.Context, chunks []chunkmaster.Chunk, storages map[string]storage.Storage, writer io.Writer) error {
 	for i, chunk := range chunks {
 		if i != int(chunk.Order) {
 			panic("incorrect chunk order")
@@ -128,15 +129,10 @@ func reconstructData(ctx context.Context, filepath string, chunks []chunkmaster.
 			return fmt.Errorf("storage instance %s missing", chunk.StorageInstance)
 		}
 
-		err := storage.RetrieveChunk(ctx, chunkId(filepath, chunk.Order), writer)
+		err := storage.RetrieveChunk(ctx, chunk.FileId, writer)
 		if err != nil {
 			return fmt.Errorf("cannot retrieve chunk %d on instance %s with error: %w", chunk.Order, chunk.StorageInstance, err)
 		}
 	}
 	return nil
-}
-
-// TODO probably should use separate type for chunkIDs for typesafety. Or it is storage's responsibility to do it internally
-func chunkId(filepath string, order int32) string {
-	return fmt.Sprintf("%s.part.%d", filepath, order)
 }

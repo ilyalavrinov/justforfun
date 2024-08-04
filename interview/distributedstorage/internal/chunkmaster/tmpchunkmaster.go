@@ -1,6 +1,8 @@
 package chunkmaster
 
 import (
+	"encoding/base64"
+	"fmt"
 	"math/rand/v2"
 
 	"github.com/ilyalavrinov/justforfun/interview/distributedstorage/internal/storage"
@@ -36,7 +38,8 @@ func (tmp *TemporaryChunkMaster) SplitToChunks(filepath string, size int64) ([]C
 		return nil, ErrNotEnoughStorageNodes
 	}
 
-	if _, found := tmp.chunkCatalog[filepath]; found {
+	fullFileId := incomingFilePathToId(filepath)
+	if _, found := tmp.chunkCatalog[fullFileId]; found {
 		return nil, ErrFileDuplicate
 	}
 
@@ -65,18 +68,24 @@ func (tmp *TemporaryChunkMaster) SplitToChunks(filepath string, size int64) ([]C
 			StorageInstance:   storages[i],
 			OriginalFileStart: int64(i) * chunkSize,
 			Size:              chunkSize,
+			FileId:            fmt.Sprintf("%s.part.%d", fullFileId, i),
 		})
 	}
 	chunks[len(chunks)-1].Size = size - (chunkSize * int64(tmp.splitNumber-1))
-	tmp.chunkCatalog[filepath] = chunks
+	tmp.chunkCatalog[fullFileId] = chunks
 
 	return chunks, nil
 }
 
 func (tmp *TemporaryChunkMaster) ChunksToRestore(filepath string) ([]Chunk, error) {
-	chunks, found := tmp.chunkCatalog[filepath]
+	fullFileId := incomingFilePathToId(filepath)
+	chunks, found := tmp.chunkCatalog[fullFileId]
 	if !found {
 		return nil, ErrFileNotFound
 	}
 	return chunks, nil
+}
+
+func incomingFilePathToId(filepath string) string {
+	return base64.StdEncoding.EncodeToString([]byte(filepath))
 }

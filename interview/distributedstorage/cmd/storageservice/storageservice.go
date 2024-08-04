@@ -72,8 +72,20 @@ func newStorageServer(storageLocation string) (*storageServer, error) {
 }
 
 func (ssrv *storageServer) StoreData(ctx context.Context, in *pb.StoredUnit) (*emptypb.Empty, error) {
-	filename := fmt.Sprintf("%s.part.%d", in.GetFileId(), in.GetChunkId())
 	reader := bytes.NewReader(in.GetData())
-	err := ssrv.storage.AcceptChunk(ctx, filename, reader)
+	err := ssrv.storage.StoreChunk(ctx, in.GetFileInfo().GetFileId(), reader)
 	return nil, err
+}
+
+func (ssrv *storageServer) RetrieveData(ctx context.Context, in *pb.FileInfo) (*pb.StoredUnit, error) {
+	var buffer bytes.Buffer
+	err := ssrv.storage.RetrieveChunk(ctx, in.GetFileId(), &buffer)
+	if err != nil {
+		return nil, err
+	}
+	unit := &pb.StoredUnit{
+		FileInfo: in,
+		Data:     buffer.Bytes(),
+	}
+	return unit, nil
 }

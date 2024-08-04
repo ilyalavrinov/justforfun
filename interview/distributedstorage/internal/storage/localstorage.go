@@ -28,7 +28,7 @@ func NewLocalStorage(saveDir string) (Storage, error) {
 	}, nil
 }
 
-func (ts *localStorage) AcceptChunk(_ context.Context, filepath string, reader io.Reader) error {
+func (ts *localStorage) StoreChunk(_ context.Context, filepath string, reader io.Reader) error {
 	fullpath := path.Join(ts.rootDir, filepath)
 	_, err := os.Stat(fullpath)
 	if err == nil || !errors.Is(err, os.ErrNotExist) {

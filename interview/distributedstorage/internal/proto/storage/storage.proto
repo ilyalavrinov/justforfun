@@ -4,12 +4,16 @@ package storage;
 option go_package = "github.com/ilyalavrinov/justforfun/interview/distributedstorage/internal/proto/storage";
 import "google/protobuf/empty.proto";
 
-message StoredUnit {
+message FileInfo {
     string file_id = 1;
-    int32 chunk_id = 2;
-    bytes data = 3;
+}
+
+message StoredUnit {
+    FileInfo file_info = 1;
+    bytes data = 2;
 }
 
 service Storage {
     rpc StoreData (StoredUnit) returns (google.protobuf.Empty) {};
+    rpc RetrieveData (FileInfo) returns (StoredUnit) {};
 }

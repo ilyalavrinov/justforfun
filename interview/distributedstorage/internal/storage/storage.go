@@ -6,6 +6,6 @@ import (
 )
 
 type Storage interface {
-	AcceptChunk(context.Context, string, io.Reader) error
+	StoreChunk(context.Context, string, io.Reader) error
 	RetrieveChunk(context.Context, string, io.Writer) error
 }

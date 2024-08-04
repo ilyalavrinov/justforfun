@@ -1,9 +1,11 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 
 	pb "github.com/ilyalavrinov/justforfun/interview/distributedstorage/internal/proto/storage"
 	"google.golang.org/grpc"
@@ -28,14 +30,16 @@ func NewRemoteStorage(addr string) (Storage, error) {
 	}, nil
 }
 
-func (rs *remoteStorage) AcceptChunk(ctx context.Context, fileId string, reader io.Reader) error {
+func (rs *remoteStorage) StoreChunk(ctx context.Context, fileId string, reader io.Reader) error {
 	data, err := io.ReadAll(reader) // TODO: get rid of it. Too much reading, I think I can pass reader directly somehow
 	if err != nil {
 		return fmt.Errorf("cannot readall: %w", err)
 	}
 	unit := &pb.StoredUnit{
-		FileId: fileId,
-		Data:   data,
+		FileInfo: &pb.FileInfo{
+			FileId: fileId,
+		},
+		Data: data,
 	}
 	_, err = rs.client.StoreData(ctx, unit)
 	if err != nil {
@@ -45,5 +49,15 @@ func (rs *remoteStorage) AcceptChunk(ctx context.Context, fileId string, reader 
 }
 
 func (rs *remoteStorage) RetrieveChunk(ctx context.Context, fileId string, writer io.Writer) error {
-	return fmt.Errorf("remote retrieve not implemented")
+	info := &pb.FileInfo{
+		FileId: fileId,
+	}
+	unit, err := rs.client.RetrieveData(ctx, info)
+	if err != nil {
+		return fmt.Errorf("remote retrieve data failed: %w", err)
+	}
+	reader := bytes.NewReader(unit.GetData())
+	written, err := io.Copy(writer, reader)
+	slog.Info("retrieve read done", "file_id", fileId, "written", written, "err", err)
+	return err
 }

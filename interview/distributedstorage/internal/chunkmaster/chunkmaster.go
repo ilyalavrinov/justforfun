@@ -11,6 +11,7 @@ type Chunk struct {
 	StorageInstance   string
 	OriginalFileStart int64
 	Size              int64
+	FileId            string
 }
 
 var (

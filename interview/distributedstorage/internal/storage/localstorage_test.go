@@ -20,7 +20,7 @@ func TestTempStorageSendRetrieve(t *testing.T) {
 
 	filename := "this/is/my/file1"
 	ctx := context.Background()
-	err := storage.AcceptChunk(ctx, filename, reader)
+	err := storage.StoreChunk(ctx, filename, reader)
 	require.NoError(t, err)
 
 	var retrieved bytes.Buffer
@@ -39,9 +39,9 @@ func TestTempStorageSendTwice(t *testing.T) {
 
 	filename := "this/is/my/file2"
 	ctx := context.Background()
-	err := storage.AcceptChunk(ctx, filename, reader)
+	err := storage.StoreChunk(ctx, filename, reader)
 	require.NoError(t, err)
-	err = storage.AcceptChunk(ctx, filename, reader)
+	err = storage.StoreChunk(ctx, filename, reader)
 	assert.Error(t, err)
 }
 
