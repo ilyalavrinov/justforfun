@@ -20,6 +20,7 @@ import (
 
 func main() {
 	argStorageLocation := flag.String("storage-location", "", "location where all files will be stored locally")
+	argAdvertiseHost := flag.String("advertise-host", "localhost", "send this host for service discovery")
 	argPort := flag.Int("port", 45346, "port for listening for incoming data")
 	argInventoryHost := flag.String("inventory-host", "localhost:3609", "address to connect to notify that this storage is up")
 	flag.Parse()
@@ -28,12 +29,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	if *argAdvertiseHost == "" {
+		slog.Error("missing advertise host arg")
+		os.Exit(1)
+	}
+
 	if *argPort <= 0 {
 		slog.Error("port arg is incorrect", "port", *argPort)
 		os.Exit(1)
 	}
 
-	go runHeartbeatSender(fmt.Sprintf("localhost:%d", *argPort), *argInventoryHost)
+	go runHeartbeatSender(fmt.Sprintf("%s:%d", *argAdvertiseHost, *argPort), *argInventoryHost)
 
 	err := runServer(*argStorageLocation, *argPort)
 	if err != nil {

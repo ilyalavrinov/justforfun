@@ -1,0 +1,46 @@
+services:
+  apiservice:
+    build:
+      context: ..
+      dockerfile: ./docker/apiservice.Dockerfile
+    networks:
+      - diststorage
+    ports:
+      - :7001:80/tcp
+    volumes:
+      - diststorage-apiservice:/opt/diststorage/apiservice
+    command: ["/apiservice", "--inventory-port", "3609"]
+
+  storage-1:
+    build:
+      context: ..
+      dockerfile: ./docker/storageservice.Dockerfile
+    networks:
+      - diststorage
+    volumes:
+      - diststorage-storage-1:/opt/diststorage/storage
+    command: ["/storageservice", "--storage-location", "/opt/diststorage/storage", "--inventory-host", "apiservice:3609", "--advertise-host", "storage-1", "--port", "45001"]
+
+  storage-2:
+    build:
+      context: ..
+      dockerfile: ./docker/storageservice.Dockerfile
+    networks:
+      - diststorage
+    volumes:
+      - diststorage-storage-2:/opt/diststorage/storage
+    command: ["/storageservice", "--storage-location", "/opt/diststorage/storage", "--inventory-host", "apiservice:3609", "--advertise-host", "storage-2", "--port", "45002"]
+
+volumes:
+  diststorage-apiservice: {
+    name: "diststorage-apiservice"
+  }
+  diststorage-storage-1: {
+    name: "diststorage-storage-1"
+  }
+  diststorage-storage-2: {
+    name: "diststorage-storage-2"
+  }
+
+networks:
+  diststorage: {}
