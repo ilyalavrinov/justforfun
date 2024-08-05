@@ -1,46 +1,40 @@
 package chunkmaster
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
-	pb "github.com/ilyalavrinov/justforfun/interview/distributedstorage/internal/proto/storageinventory"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func newReadyForTestTmpChunker(numberOfChunks int) ChunkMaster {
-	chunker := NewTemporaryChunkMaster(numberOfChunks)
-	cm := chunker.(*TemporaryChunkMaster)
-	for i := range numberOfChunks {
-		nodeInfo := &pb.StorageInfo{
-			Iam:            fmt.Sprintf("tempstorage-%d", i),
-			AvailableBytes: 0,
+func randomStorages(n int) map[string]StorageInfo {
+	res := make(map[string]StorageInfo, n)
+	for i := range n {
+		storageId := fmt.Sprintf("tempstorage-%d", i)
+		res[storageId] = StorageInfo{
+			StorageID:      storageId,
+			AvailableBytes: 900000,
 		}
-		cm.UpdateStorageInfo(context.Background(), nodeInfo)
 	}
-	return chunker
+	return res
+}
+
+func newReadyForTestTmpChunker(numberOfChunks int) (ChunkMaster, map[string]StorageInfo) {
+	return NewTemporaryChunkMaster(numberOfChunks), randomStorages(numberOfChunks)
 }
 
 func TestNotEnoughStorageHosts(t *testing.T) {
 	chunker := NewTemporaryChunkMaster(6)
-	cm := chunker.(*TemporaryChunkMaster)
-	for i := range 5 {
-		nodeInfo := &pb.StorageInfo{
-			Iam:            fmt.Sprintf("tempstorage-%d", i),
-			AvailableBytes: 0,
-		}
-		cm.UpdateStorageInfo(context.Background(), nodeInfo)
-	}
-	chunks, err := chunker.SplitToChunks("some/path", 9000)
+	storages := randomStorages(5)
+	chunks, err := chunker.SplitToChunks("some/path", 9000, storages)
 	assert.Nil(t, chunks)
 	assert.ErrorIs(t, err, ErrNotEnoughStorageNodes)
 }
 
 func TestSplitDataForOnlyOneChunk(t *testing.T) {
-	chunker := newReadyForTestTmpChunker(6)
-	chunks, err := chunker.SplitToChunks("some/path", 3)
+	chunker, storages := newReadyForTestTmpChunker(6)
+	chunks, err := chunker.SplitToChunks("some/path", 3, storages)
 	require.NoError(t, err)
 	require.Len(t, chunks, 1)
 	assert.EqualValues(t, 0, chunks[0].Order)
@@ -49,8 +43,8 @@ func TestSplitDataForOnlyOneChunk(t *testing.T) {
 }
 
 func TestSplitDataSmallSize(t *testing.T) {
-	chunker := newReadyForTestTmpChunker(6)
-	chunks, err := chunker.SplitToChunks("some/path", 8)
+	chunker, storages := newReadyForTestTmpChunker(6)
+	chunks, err := chunker.SplitToChunks("some/path", 8, storages)
 	require.NoError(t, err)
 	assert.Len(t, chunks, 6)
 	var sumChunks int64 = 0
@@ -65,8 +59,8 @@ func TestSplitDataSmallSize(t *testing.T) {
 }
 
 func TestSplitData(t *testing.T) {
-	chunker := newReadyForTestTmpChunker(6)
-	chunks, err := chunker.SplitToChunks("some/path", 9007)
+	chunker, storages := newReadyForTestTmpChunker(6)
+	chunks, err := chunker.SplitToChunks("some/path", 9007, storages)
 	require.NoError(t, err)
 	assert.Len(t, chunks, 6)
 	var sumChunks int64 = 0
@@ -81,27 +75,27 @@ func TestSplitData(t *testing.T) {
 }
 
 func TestDuplicatesNotAllowed(t *testing.T) {
-	chunker := newReadyForTestTmpChunker(6)
-	filepath := "same/path"
-	chunks, err := chunker.SplitToChunks(filepath, 9007)
+	chunker, storages := newReadyForTestTmpChunker(6)
+	fileref := "same/path"
+	chunks, err := chunker.SplitToChunks(fileref, 9007, storages)
 	require.NoError(t, err)
 	assert.Len(t, chunks, 6)
-	_, err = chunker.SplitToChunks(filepath, 1035)
+	_, err = chunker.SplitToChunks(fileref, 1035, storages)
 	require.ErrorIs(t, err, ErrFileDuplicate)
 }
 
 func TestSplitAndRetrieve(t *testing.T) {
-	chunker := newReadyForTestTmpChunker(6)
-	filepath := "this/is/my/path123"
-	chunksSplit, err := chunker.SplitToChunks(filepath, 54623)
+	chunker, storages := newReadyForTestTmpChunker(6)
+	fileref := "this/is/my/path123"
+	chunksSplit, err := chunker.SplitToChunks(fileref, 54623, storages)
 	require.NoError(t, err)
-	chunksRestore, err := chunker.ChunksToRestore(filepath)
+	chunksRestore, err := chunker.ChunksToRestore(fileref)
 	require.NoError(t, err)
 	require.EqualValues(t, chunksSplit, chunksRestore)
 }
 
 func TestFileNotFound(t *testing.T) {
-	chunker := newReadyForTestTmpChunker(6)
+	chunker, _ := newReadyForTestTmpChunker(6)
 	_, err := chunker.ChunksToRestore("abc/3424/ty")
 	require.ErrorIs(t, err, ErrFileNotFound)
 }

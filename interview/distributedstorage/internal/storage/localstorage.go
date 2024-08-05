@@ -28,11 +28,11 @@ func NewLocalStorage(saveDir string) (Storage, error) {
 	}, nil
 }
 
-func (ts *localStorage) StoreChunk(_ context.Context, filepath string, reader io.Reader) error {
-	fullpath := path.Join(ts.rootDir, filepath)
+func (ts *localStorage) StoreChunk(_ context.Context, fileref string, reader io.Reader) error {
+	fullpath := path.Join(ts.rootDir, fileref)
 	_, err := os.Stat(fullpath)
 	if err == nil || !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("file already exists at %s", filepath)
+		return fmt.Errorf("file already exists at %s", fileref)
 	}
 
 	err = os.MkdirAll(path.Dir(fullpath), fs.FileMode(0o700))
@@ -50,12 +50,12 @@ func (ts *localStorage) StoreChunk(_ context.Context, filepath string, reader io
 	return err
 }
 
-func (ts *localStorage) RetrieveChunk(_ context.Context, filepath string, writer io.Writer) error {
-	fullpath := path.Join(ts.rootDir, filepath)
+func (ts *localStorage) RetrieveChunk(_ context.Context, fileref string, writer io.Writer) error {
+	fullpath := path.Join(ts.rootDir, fileref)
 
 	f, err := os.Open(fullpath)
 	if err != nil {
-		return fmt.Errorf("cannot open chunk at %s, err: %w", filepath, err)
+		return fmt.Errorf("cannot open chunk at %s, err: %w", fileref, err)
 	}
 
 	written, err := io.Copy(writer, f)
@@ -63,8 +63,8 @@ func (ts *localStorage) RetrieveChunk(_ context.Context, filepath string, writer
 	return err
 }
 
-func (ts *localStorage) DeleteChunk(_ context.Context, filepath string) error {
-	fullpath := path.Join(ts.rootDir, filepath)
+func (ts *localStorage) DeleteChunk(_ context.Context, fileref string) error {
+	fullpath := path.Join(ts.rootDir, fileref)
 
 	err := os.Remove(fullpath)
 	if err != nil {

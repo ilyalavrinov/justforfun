@@ -21,7 +21,7 @@ func NewTemporaryChunkMaster(chunkSplitNumber int) ChunkMaster {
 	}
 }
 
-func (cm *TemporaryChunkMaster) SplitToChunks(filepath string, size int64, storages map[string]StorageInfo) ([]Chunk, error) {
+func (cm *TemporaryChunkMaster) SplitToChunks(fileref string, size int64, storages map[string]StorageInfo) ([]Chunk, error) {
 	if len(storages) < cm.splitNumber {
 		return nil, ErrNotEnoughStorageNodes
 	}
@@ -29,7 +29,7 @@ func (cm *TemporaryChunkMaster) SplitToChunks(filepath string, size int64, stora
 	cm.chunkMutex.Lock()
 	defer cm.chunkMutex.Unlock()
 
-	if _, found := cm.chunkCatalog[filepath]; found {
+	if _, found := cm.chunkCatalog[fileref]; found {
 		return nil, ErrFileDuplicate
 	}
 
@@ -74,7 +74,7 @@ func (cm *TemporaryChunkMaster) SplitToChunks(filepath string, size int64, stora
 		return nil, ErrNotEnoughAvailableStorage
 	}
 
-	cm.chunkCatalog[filepath] = chunks
+	cm.chunkCatalog[fileref] = chunks
 
 	return chunks, nil
 }
@@ -95,19 +95,19 @@ func prioritizeStorages(storages map[string]StorageInfo) []string {
 	return ids
 }
 
-func (cm *TemporaryChunkMaster) ChunksToRestore(filepath string) ([]Chunk, error) {
+func (cm *TemporaryChunkMaster) ChunksToRestore(fileref string) ([]Chunk, error) {
 	cm.chunkMutex.RLock()
 	defer cm.chunkMutex.RUnlock()
 
-	chunks, found := cm.chunkCatalog[filepath]
+	chunks, found := cm.chunkCatalog[fileref]
 	if !found {
 		return nil, ErrFileNotFound
 	}
 	return chunks, nil
 }
 
-func (cm *TemporaryChunkMaster) DeleteChunks(filepath string) {
+func (cm *TemporaryChunkMaster) DeleteChunks(fileref string) {
 	cm.chunkMutex.Lock()
 	defer cm.chunkMutex.Unlock()
-	delete(cm.chunkCatalog, filepath)
+	delete(cm.chunkCatalog, fileref)
 }

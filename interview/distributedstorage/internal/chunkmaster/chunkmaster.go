@@ -26,7 +26,7 @@ type StorageInfo struct {
 
 type ChunkMaster interface {
 	// splitting functionality
-	SplitToChunks(filepath string, size int64, storages map[string]StorageInfo) ([]Chunk, error)
-	ChunksToRestore(filepath string) ([]Chunk, error)
-	DeleteChunks(filepath string)
+	SplitToChunks(fileref string, size int64, storages map[string]StorageInfo) ([]Chunk, error)
+	ChunksToRestore(fileref string) ([]Chunk, error)
+	DeleteChunks(fileref string)
 }

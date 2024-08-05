@@ -37,10 +37,10 @@ func main() {
 	retriever := &retrieveHandler{dd: dataDistributor}
 	storer := &storeHandler{dd: dataDistributor}
 
-	http.Handle("GET /{filepath}", retriever)
-	http.Handle("POST /{filepath}", storer)
+	http.Handle("GET /{fileref}", retriever)
+	http.Handle("POST /{fileref}", storer)
 
-	slog.Info("apiservice started")
+	slog.Info("apiservice started", "chunks", *argChunksNum)
 	err = http.ListenAndServe("", nil)
 	if err != nil {
 		slog.Error("server exit with error", "err", err)
@@ -77,12 +77,12 @@ type storeHandler struct {
 }
 
 func (h *storeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	filepath := req.PathValue("filepath")
-	slog.Info("incoming store request", "filepath", filepath, "size", req.ContentLength)
-	err := h.dd.DistributeData(req.Context(), filepath, req.ContentLength, req.Body)
+	fileref := req.PathValue("fileref")
+	slog.Info("incoming store request", "fileref", fileref, "size", req.ContentLength)
+	err := h.dd.DistributeData(req.Context(), fileref, req.ContentLength, req.Body)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		slog.Error("distribute data error", "err", err, "filepath", filepath)
+		slog.Error("distribute data error", "err", err, "fileref", fileref)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
@@ -93,12 +93,12 @@ type retrieveHandler struct {
 }
 
 func (h *retrieveHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	filepath := req.PathValue("filepath")
-	slog.Info("incoming retrieve request", "filepath", filepath)
-	err := h.dd.ReconstructData(req.Context(), filepath, w)
+	fileref := req.PathValue("fileref")
+	slog.Info("incoming retrieve request", "fileref", fileref)
+	err := h.dd.ReconstructData(req.Context(), fileref, w)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		slog.Error("reconstruct data error", "err", err, "filepath", filepath)
+		slog.Error("reconstruct data error", "err", err, "fileref", fileref)
 		return
 	}
 
