@@ -6,17 +6,12 @@ import (
 	"testing"
 
 	pb "github.com/ilyalavrinov/justforfun/interview/distributedstorage/internal/proto/storageinventory"
-	"github.com/ilyalavrinov/justforfun/interview/distributedstorage/internal/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func addNilStorage(_ string) (storage.Storage, error) {
-	return nil, nil
-}
-
 func newReadyForTestTmpChunker(numberOfChunks int) ChunkMaster {
-	chunker := NewTemporaryChunkMaster(numberOfChunks, addNilStorage)
+	chunker := NewTemporaryChunkMaster(numberOfChunks)
 	cm := chunker.(*TemporaryChunkMaster)
 	for i := range numberOfChunks {
 		nodeInfo := &pb.StorageInfo{
@@ -29,7 +24,7 @@ func newReadyForTestTmpChunker(numberOfChunks int) ChunkMaster {
 }
 
 func TestNotEnoughStorageHosts(t *testing.T) {
-	chunker := NewTemporaryChunkMaster(6, addNilStorage)
+	chunker := NewTemporaryChunkMaster(6)
 	cm := chunker.(*TemporaryChunkMaster)
 	for i := range 5 {
 		nodeInfo := &pb.StorageInfo{

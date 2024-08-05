@@ -103,6 +103,10 @@ func (ssrv *storageServer) RetrieveData(ctx context.Context, in *storagepb.FileI
 	return unit, nil
 }
 
+func (ssrv *storageServer) DeleteData(ctx context.Context, in *storagepb.FileInfo) (*emptypb.Empty, error) {
+	return nil, ssrv.storage.DeleteChunk(ctx, in.GetFileId())
+}
+
 func runHeartbeatSender(iam, storageDir, inventoryServerAddr string) {
 	ticker := time.NewTicker(10 * time.Second)
 	for {
@@ -116,7 +120,8 @@ func runHeartbeatSender(iam, storageDir, inventoryServerAddr string) {
 		var stats unix.Statfs_t
 		err = unix.Statfs(storageDir, &stats)
 		if err != nil {
-			slog.Error("cannot stat storage dir: %w", err)
+			slog.Error("cannot stat storage dir", "err", err)
+			continue
 		}
 		availableBytes := int64(stats.Bavail) * int64(stats.Bsize)
 

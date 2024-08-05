@@ -45,6 +45,7 @@ func (rs *remoteStorage) StoreChunk(ctx context.Context, fileId string, reader i
 	if err != nil {
 		return fmt.Errorf("remote store data failed: %w", err)
 	}
+	slog.Info("remote store done", "file_id", fileId, "err", err)
 	return nil
 }
 
@@ -58,6 +59,18 @@ func (rs *remoteStorage) RetrieveChunk(ctx context.Context, fileId string, write
 	}
 	reader := bytes.NewReader(unit.GetData())
 	written, err := io.Copy(writer, reader)
-	slog.Info("retrieve read done", "file_id", fileId, "written", written, "err", err)
+	slog.Info("remote retrieve done", "file_id", fileId, "written", written, "err", err)
+	return err
+}
+
+func (rs *remoteStorage) DeleteChunk(ctx context.Context, fileId string) error {
+	info := &pb.FileInfo{
+		FileId: fileId,
+	}
+	_, err := rs.client.DeleteData(ctx, info)
+	if err != nil {
+		return fmt.Errorf("remote delete data failed: %w", err)
+	}
+	slog.Info("remote delete done", "file_id", fileId, "err", err)
 	return err
 }

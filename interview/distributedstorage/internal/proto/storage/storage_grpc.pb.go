@@ -22,6 +22,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	Storage_StoreData_FullMethodName    = "/storage.Storage/StoreData"
 	Storage_RetrieveData_FullMethodName = "/storage.Storage/RetrieveData"
+	Storage_DeleteData_FullMethodName   = "/storage.Storage/DeleteData"
 )
 
 // StorageClient is the client API for Storage service.
@@ -30,6 +31,7 @@ const (
 type StorageClient interface {
 	StoreData(ctx context.Context, in *StoredUnit, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	RetrieveData(ctx context.Context, in *FileInfo, opts ...grpc.CallOption) (*StoredUnit, error)
+	DeleteData(ctx context.Context, in *FileInfo, opts ...grpc.CallOption) (*emptypb.Empty, error)
 }
 
 type storageClient struct {
@@ -60,12 +62,23 @@ func (c *storageClient) RetrieveData(ctx context.Context, in *FileInfo, opts ...
 	return out, nil
 }
 
+func (c *storageClient) DeleteData(ctx context.Context, in *FileInfo, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, Storage_DeleteData_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // StorageServer is the server API for Storage service.
 // All implementations must embed UnimplementedStorageServer
 // for forward compatibility.
 type StorageServer interface {
 	StoreData(context.Context, *StoredUnit) (*emptypb.Empty, error)
 	RetrieveData(context.Context, *FileInfo) (*StoredUnit, error)
+	DeleteData(context.Context, *FileInfo) (*emptypb.Empty, error)
 	mustEmbedUnimplementedStorageServer()
 }
 
@@ -81,6 +94,9 @@ func (UnimplementedStorageServer) StoreData(context.Context, *StoredUnit) (*empt
 }
 func (UnimplementedStorageServer) RetrieveData(context.Context, *FileInfo) (*StoredUnit, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RetrieveData not implemented")
+}
+func (UnimplementedStorageServer) DeleteData(context.Context, *FileInfo) (*emptypb.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteData not implemented")
 }
 func (UnimplementedStorageServer) mustEmbedUnimplementedStorageServer() {}
 func (UnimplementedStorageServer) testEmbeddedByValue()                 {}
@@ -139,6 +155,24 @@ func _Storage_RetrieveData_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Storage_DeleteData_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FileInfo)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StorageServer).DeleteData(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Storage_DeleteData_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StorageServer).DeleteData(ctx, req.(*FileInfo))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Storage_ServiceDesc is the grpc.ServiceDesc for Storage service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -153,6 +187,10 @@ var Storage_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RetrieveData",
 			Handler:    _Storage_RetrieveData_Handler,
+		},
+		{
+			MethodName: "DeleteData",
+			Handler:    _Storage_DeleteData_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

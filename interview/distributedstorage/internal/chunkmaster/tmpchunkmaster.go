@@ -1,33 +1,11 @@
 package chunkmaster
 
 import (
-	"context"
-	"encoding/base64"
-	"fmt"
-	"log/slog"
-	"math"
 	"sort"
 	"sync"
-
-	pb "github.com/ilyalavrinov/justforfun/interview/distributedstorage/internal/proto/storageinventory"
-	"github.com/ilyalavrinov/justforfun/interview/distributedstorage/internal/storage"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
-type storageMeta struct {
-	storageID      string
-	storage        storage.Storage
-	availableBytes int64
-}
-
 type TemporaryChunkMaster struct {
-	// storage inventory
-	pb.UnsafeStorageInventoryServer
-	storageMutex   sync.RWMutex
-	storages       map[string]*storageMeta
-	storageCreator ConnectStorageFunc
-
-	// chunky logic
 	chunkMutex   sync.RWMutex
 	chunkCatalog map[string][]Chunk
 
@@ -36,49 +14,31 @@ type TemporaryChunkMaster struct {
 
 var _ ChunkMaster = (*TemporaryChunkMaster)(nil)
 
-type ConnectStorageFunc func(string) (storage.Storage, error)
-
-func NewTemporaryChunkMaster(chunkSplitNumber int, connectFunc ConnectStorageFunc) ChunkMaster {
+func NewTemporaryChunkMaster(chunkSplitNumber int) ChunkMaster {
 	return &TemporaryChunkMaster{
-		storages:       make(map[string]*storageMeta),
-		storageCreator: connectFunc,
-		chunkCatalog:   make(map[string][]Chunk),
-		splitNumber:    chunkSplitNumber,
+		chunkCatalog: make(map[string][]Chunk),
+		splitNumber:  chunkSplitNumber,
 	}
 }
 
-func (cm *TemporaryChunkMaster) Storages() map[string]storage.Storage {
-	cm.storageMutex.RLock()
-	defer cm.storageMutex.RUnlock()
-	res := make(map[string]storage.Storage, len(cm.storages))
-	for id, storage := range cm.storages {
-		res[id] = storage.storage
-	}
-	return res
-}
-
-func (cm *TemporaryChunkMaster) SplitToChunks(filepath string, size int64) ([]Chunk, error) {
-	if len(cm.storages) < cm.splitNumber {
+func (cm *TemporaryChunkMaster) SplitToChunks(filepath string, size int64, storages map[string]StorageInfo) ([]Chunk, error) {
+	if len(storages) < cm.splitNumber {
 		return nil, ErrNotEnoughStorageNodes
 	}
 
 	cm.chunkMutex.Lock()
 	defer cm.chunkMutex.Unlock()
 
-	fullFileId := incomingFilePathToId(filepath)
-	if _, found := cm.chunkCatalog[fullFileId]; found {
+	if _, found := cm.chunkCatalog[filepath]; found {
 		return nil, ErrFileDuplicate
 	}
 
-	cm.storageMutex.Lock() // TODO: 2 mutexes taken at the same time are bad.
-	defer cm.storageMutex.Unlock()
-
-	prioritizedIds := prioritizeStorages(cm.storages)
+	prioritizedIds := prioritizeStorages(storages)
 
 	// special case when we cannot split even by 1 byte to each storage
 	if size < int64(cm.splitNumber) {
 		targetStorageId := prioritizedIds[0]
-		availMem := cm.storages[targetStorageId].availableBytes
+		availMem := storages[targetStorageId].AvailableBytes
 		if availMem < size {
 			return nil, ErrNotEnoughAvailableStorage
 		}
@@ -94,11 +54,10 @@ func (cm *TemporaryChunkMaster) SplitToChunks(filepath string, size int64) ([]Ch
 	chunkSize := size / int64(cm.splitNumber)
 	for i := range cm.splitNumber {
 		chunks = append(chunks, Chunk{
-			Order:             int32(i),
+			Order:             uint32(i),
 			StorageInstance:   prioritizedIds[i],
 			OriginalFileStart: int64(i) * chunkSize,
 			Size:              chunkSize,
-			FileId:            fmt.Sprintf("%s.part.%d", fullFileId, i),
 		})
 	}
 	chunks[len(chunks)-1].Size = size - (chunkSize * int64(cm.splitNumber-1))
@@ -106,7 +65,7 @@ func (cm *TemporaryChunkMaster) SplitToChunks(filepath string, size int64) ([]Ch
 	// checking that we have enough memory
 	isAllMemGood := true
 	for _, chunk := range chunks {
-		storageAvailable := cm.storages[chunk.StorageInstance].availableBytes
+		storageAvailable := storages[chunk.StorageInstance].AvailableBytes
 		if storageAvailable < chunk.Size {
 			isAllMemGood = false
 		}
@@ -115,28 +74,23 @@ func (cm *TemporaryChunkMaster) SplitToChunks(filepath string, size int64) ([]Ch
 		return nil, ErrNotEnoughAvailableStorage
 	}
 
-	// all good, reserve quota! iterating again, this chunky function is so ugly
-	for _, chunk := range chunks {
-		cm.storages[chunk.StorageInstance].availableBytes -= chunk.Size
-	}
-
-	cm.chunkCatalog[fullFileId] = chunks
+	cm.chunkCatalog[filepath] = chunks
 
 	return chunks, nil
 }
 
-func prioritizeStorages(storages map[string]*storageMeta) []string {
-	list := make([]*storageMeta, 0, len(storages))
-	for _, meta := range storages {
-		list = append(list, meta)
+func prioritizeStorages(storages map[string]StorageInfo) []string {
+	list := make([]StorageInfo, 0, len(storages))
+	for _, info := range storages {
+		list = append(list, info)
 	}
 	sort.Slice(list, func(i, j int) bool {
-		return list[i].availableBytes > list[j].availableBytes
+		return list[i].AvailableBytes > list[j].AvailableBytes
 	})
 
 	ids := make([]string, 0, len(list))
-	for _, meta := range list {
-		ids = append(ids, meta.storageID)
+	for _, info := range list {
+		ids = append(ids, info.StorageID)
 	}
 	return ids
 }
@@ -145,45 +99,15 @@ func (cm *TemporaryChunkMaster) ChunksToRestore(filepath string) ([]Chunk, error
 	cm.chunkMutex.RLock()
 	defer cm.chunkMutex.RUnlock()
 
-	fullFileId := incomingFilePathToId(filepath)
-	chunks, found := cm.chunkCatalog[fullFileId]
+	chunks, found := cm.chunkCatalog[filepath]
 	if !found {
 		return nil, ErrFileNotFound
 	}
 	return chunks, nil
 }
 
-func incomingFilePathToId(filepath string) string {
-	return base64.StdEncoding.EncodeToString([]byte(filepath))
-}
-
-func (cm *TemporaryChunkMaster) UpdateStorageInfo(_ context.Context, info *pb.StorageInfo) (*emptypb.Empty, error) {
-	cm.storageMutex.Lock()
-	defer cm.storageMutex.Unlock()
-
-	storageID := info.GetIam()
-	meta, found := cm.storages[storageID]
-	if !found {
-		rs, err := cm.storageCreator(storageID)
-		if err != nil {
-			slog.Error("cannot add new storage", "storage_id", storageID, "err", err)
-			return nil, err
-		}
-		meta = &storageMeta{
-			storageID:      storageID,
-			storage:        rs,
-			availableBytes: math.MaxInt64,
-		}
-		cm.storages[storageID] = meta
-		slog.Info("added new storage", "storage_id", storageID)
-	}
-	availBytesNow := meta.availableBytes
-	slog.Info("heartbeat received", "from", storageID, "available_bytes_received", info.GetAvailableBytes(), "available_bytes_known", availBytesNow)
-	// TODO: here we'll be getting a race condition when a chunk is being uploaded/removed, which can easily lead to overbooking of space.
-	// But it should self-recover! ..probably.
-	// Using our quotation calculation should be prevailing over what we have reported from host if we detect shortage
-	if info.GetAvailableBytes() < availBytesNow {
-		meta.availableBytes = info.GetAvailableBytes()
-	}
-	return nil, nil
+func (cm *TemporaryChunkMaster) DeleteChunks(filepath string) {
+	cm.chunkMutex.Lock()
+	defer cm.chunkMutex.Unlock()
+	delete(cm.chunkCatalog, filepath)
 }

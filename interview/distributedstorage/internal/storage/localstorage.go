@@ -63,6 +63,17 @@ func (ts *localStorage) RetrieveChunk(_ context.Context, filepath string, writer
 	return err
 }
 
+func (ts *localStorage) DeleteChunk(_ context.Context, filepath string) error {
+	fullpath := path.Join(ts.rootDir, filepath)
+
+	err := os.Remove(fullpath)
+	if err != nil {
+		return fmt.Errorf("cannot delete chunk at %s, err: %w", fullpath, err)
+	}
+	slog.Info("delete chunk done", "fullpath", fullpath)
+	return nil
+}
+
 // creates a new directory in /tmp. Panics if something is wrong
 func NewTmpStorage() Storage {
 	tmpdir := path.Join(os.TempDir(), fmt.Sprintf("diststorage-%d", 100000+rand.Intn(100000)))
