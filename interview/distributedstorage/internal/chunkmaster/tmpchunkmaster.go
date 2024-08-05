@@ -35,32 +35,33 @@ func (cm *TemporaryChunkMaster) SplitToChunks(fileref string, size int64, storag
 
 	prioritizedIds := prioritizeStorages(storages)
 
-	// special case when we cannot split even by 1 byte to each storage
+	chunks := make([]Chunk, 0, cm.splitNumber)
 	if size < int64(cm.splitNumber) {
+		// special case when we cannot split even by 1 byte to each storage
 		targetStorageId := prioritizedIds[0]
 		availMem := storages[targetStorageId].AvailableBytes
 		if availMem < size {
 			return nil, ErrNotEnoughAvailableStorage
 		}
-		return []Chunk{{
+		chunks = append(chunks, Chunk{
 			Order:             0,
 			StorageInstance:   targetStorageId,
 			OriginalFileStart: 0,
 			Size:              size,
-		}}, nil
-	}
-
-	chunks := make([]Chunk, 0, cm.splitNumber)
-	chunkSize := size / int64(cm.splitNumber)
-	for i := range cm.splitNumber {
-		chunks = append(chunks, Chunk{
-			Order:             uint32(i),
-			StorageInstance:   prioritizedIds[i],
-			OriginalFileStart: int64(i) * chunkSize,
-			Size:              chunkSize,
 		})
+	} else {
+		// normal case - all splitNumber hosts are available
+		chunkSize := size / int64(cm.splitNumber)
+		for i := range cm.splitNumber {
+			chunks = append(chunks, Chunk{
+				Order:             uint32(i),
+				StorageInstance:   prioritizedIds[i],
+				OriginalFileStart: int64(i) * chunkSize,
+				Size:              chunkSize,
+			})
+		}
+		chunks[len(chunks)-1].Size = size - (chunkSize * int64(cm.splitNumber-1))
 	}
-	chunks[len(chunks)-1].Size = size - (chunkSize * int64(cm.splitNumber-1))
 
 	// checking that we have enough memory
 	isAllMemGood := true
