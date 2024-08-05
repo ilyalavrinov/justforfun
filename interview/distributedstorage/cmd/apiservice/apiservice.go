@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -77,15 +79,48 @@ type storeHandler struct {
 func (h *storeHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	filepath := req.PathValue("filepath")
 	slog.Info("incoming store request", "filepath", filepath, "size", req.ContentLength)
-	ctx := req.Context()
-	err := h.chunkMaster.DistributeData(ctx, filepath, req.Body, req.ContentLength)
+	chunks, err := h.chunkMaster.SplitToChunks(filepath, req.ContentLength)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		slog.Error("distribute error", "err", err, "filepath", filepath)
+		slog.Error("split to chunks error", "err", err, "filepath", filepath)
+		return
+	}
+
+	ctx := req.Context()
+	err = distributeData(ctx, req.Body, chunks, h.chunkMaster.Storages())
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		slog.Error("data distribution error", "err", err, "filepath", filepath)
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+func distributeData(ctx context.Context, body io.Reader, chunks []chunkmaster.Chunk, storages map[string]storage.Storage) error {
+	for i, chunk := range chunks {
+		if i != int(chunk.Order) {
+			panic("chunks are not ordered")
+		}
+
+		storage, found := storages[chunk.StorageInstance]
+		if !found {
+			rollbackSave(ctx)
+			return fmt.Errorf("storage instance %s missing", chunk.StorageInstance)
+		}
+		// I don't think it is worth paralleling things here. Concurrent execution would help only if access to our storages is a bottleneck
+		chunkReader := io.LimitReader(body, chunk.Size)
+		err := storage.StoreChunk(ctx, chunk.FileId, chunkReader)
+		if err != nil {
+			rollbackSave(ctx)
+			return fmt.Errorf("cannot save chunk %d on instance %s with error: %w", chunk.Order, chunk.StorageInstance, err)
+		}
+	}
+	return nil
+}
+
+func rollbackSave(ctx context.Context) {
+	// panic("TODO implement it")
 }
 
 type retrieveHandler struct {
@@ -95,14 +130,39 @@ type retrieveHandler struct {
 func (h *retrieveHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	filepath := req.PathValue("filepath")
 	slog.Info("incoming retrieve request", "filepath", filepath)
-
-	ctx := req.Context()
-	err := h.chunkMaster.ReconstructData(ctx, filepath, w)
+	chunks, err := h.chunkMaster.ChunksToRestore(filepath)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		slog.Error("chunks restoration error", "err", err, "filepath", filepath)
 		return
 	}
 
+	ctx := req.Context()
+	err = reconstructData(ctx, chunks, h.chunkMaster.Storages(), w)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		slog.Error("data distribution error", "err", err, "filepath", filepath)
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
+}
+
+func reconstructData(ctx context.Context, chunks []chunkmaster.Chunk, storages map[string]storage.Storage, writer io.Writer) error {
+	for i, chunk := range chunks {
+		if i != int(chunk.Order) {
+			panic("incorrect chunk order")
+		}
+
+		storage, found := storages[chunk.StorageInstance]
+		if !found {
+			return fmt.Errorf("storage instance %s missing", chunk.StorageInstance)
+		}
+
+		err := storage.RetrieveChunk(ctx, chunk.FileId, writer)
+		if err != nil {
+			return fmt.Errorf("cannot retrieve chunk %d on instance %s with error: %w", chunk.Order, chunk.StorageInstance, err)
+		}
+	}
+	return nil
 }

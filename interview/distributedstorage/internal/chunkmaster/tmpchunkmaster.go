@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"io"
 	"log/slog"
 	"math"
 	"sort"
@@ -58,40 +57,7 @@ func (cm *TemporaryChunkMaster) Storages() map[string]storage.Storage {
 	return res
 }
 
-func (cm *TemporaryChunkMaster) DistributeData(ctx context.Context, filepath string, reader io.Reader, size int64) error {
-	chunks, err := cm.splitToChunks(filepath, size)
-	if err != nil {
-		return fmt.Errorf("split to chunks failed: %w", err)
-	}
-
-	return cm.doDistributeData(ctx, reader, filepath, chunks)
-}
-
-func (cm *TemporaryChunkMaster) doDistributeData(ctx context.Context, reader io.Reader, filepath string, chunks []Chunk) error {
-	cm.storageMutex.RLock()
-	defer cm.storageMutex.RUnlock()
-	for i, chunk := range chunks {
-		if i != int(chunk.Order) {
-			panic("chunks are not ordered")
-		}
-
-		storageMeta, found := cm.storages[chunk.StorageInstance]
-		if !found {
-			cm.rollbackSave(ctx, filepath, chunks)
-			return fmt.Errorf("storage instance %s missing", chunk.StorageInstance)
-		}
-		// I don't think it is worth paralleling things here. Concurrent execution would help only if access to our storages is a bottleneck
-		chunkReader := io.LimitReader(reader, chunk.Size)
-		err := storageMeta.storage.StoreChunk(ctx, chunk.FileId, chunkReader)
-		if err != nil {
-			cm.rollbackSave(ctx, filepath, chunks)
-			return fmt.Errorf("cannot save chunk %d on instance %s with error: %w", chunk.Order, chunk.StorageInstance, err)
-		}
-	}
-	return nil
-}
-
-func (cm *TemporaryChunkMaster) splitToChunks(filepath string, size int64) ([]Chunk, error) {
+func (cm *TemporaryChunkMaster) SplitToChunks(filepath string, size int64) ([]Chunk, error) {
 	if len(cm.storages) < cm.splitNumber {
 		return nil, ErrNotEnoughStorageNodes
 	}
@@ -175,20 +141,7 @@ func prioritizeStorages(storages map[string]*storageMeta) []string {
 	return ids
 }
 
-func (cm *TemporaryChunkMaster) ReconstructData(ctx context.Context, filepath string, writer io.Writer) error {
-	chunks, err := cm.chunksToRestore(filepath)
-	if err != nil {
-		return fmt.Errorf("cannot find chunks for restore %s: %w", filepath, err)
-	}
-
-	err = cm.doReconstructData(ctx, chunks, writer)
-	if err != nil {
-		return fmt.Errorf("cannot reconstruct data for %s: %w", filepath, err)
-	}
-	return nil
-}
-
-func (cm *TemporaryChunkMaster) chunksToRestore(filepath string) ([]Chunk, error) {
+func (cm *TemporaryChunkMaster) ChunksToRestore(filepath string) ([]Chunk, error) {
 	cm.chunkMutex.RLock()
 	defer cm.chunkMutex.RUnlock()
 
@@ -198,27 +151,6 @@ func (cm *TemporaryChunkMaster) chunksToRestore(filepath string) ([]Chunk, error
 		return nil, ErrFileNotFound
 	}
 	return chunks, nil
-}
-
-func (cm *TemporaryChunkMaster) doReconstructData(ctx context.Context, chunks []Chunk, writer io.Writer) error {
-	cm.storageMutex.RLock()
-	defer cm.storageMutex.RUnlock()
-	for i, chunk := range chunks {
-		if i != int(chunk.Order) {
-			panic("incorrect chunk order")
-		}
-
-		storageMeta, found := cm.storages[chunk.StorageInstance]
-		if !found {
-			return fmt.Errorf("storage instance %s missing", chunk.StorageInstance)
-		}
-
-		err := storageMeta.storage.RetrieveChunk(ctx, chunk.FileId, writer)
-		if err != nil {
-			return fmt.Errorf("cannot retrieve chunk %d on instance %s with error: %w", chunk.Order, chunk.StorageInstance, err)
-		}
-	}
-	return nil
 }
 
 func incomingFilePathToId(filepath string) string {
@@ -254,15 +186,4 @@ func (cm *TemporaryChunkMaster) UpdateStorageInfo(_ context.Context, info *pb.St
 		meta.availableBytes = info.GetAvailableBytes()
 	}
 	return nil, nil
-}
-
-func (cm *TemporaryChunkMaster) rollbackSave(ctx context.Context, filepath string, chunks []Chunk) {
-	for _, chunk := range chunks {
-		cm.storages[chunk.StorageInstance].availableBytes -= chunk.Size
-	}
-	cm.storageMutex.Unlock()
-
-	cm.chunkMutex.Lock()
-	delete(cm.chunkCatalog, filepath)
-	cm.chunkMutex.Unlock()
 }
