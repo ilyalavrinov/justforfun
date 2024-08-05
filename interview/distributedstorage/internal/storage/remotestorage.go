@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -31,36 +30,64 @@ func NewRemoteStorage(addr string) (Storage, error) {
 }
 
 func (rs *remoteStorage) StoreChunk(ctx context.Context, fileId string, reader io.Reader) error {
-	data, err := io.ReadAll(reader) // TODO: get rid of it. Too much reading, I think I can pass reader directly somehow
+	stream, err := rs.client.StoreData(ctx)
 	if err != nil {
-		return fmt.Errorf("cannot readall: %w", err)
+		return fmt.Errorf("store stream open failed for %s: %w", fileId, err)
 	}
-	unit := &pb.StoredUnit{
-		FileInfo: &pb.FileInfo{
-			FileId: fileId,
-		},
-		Data: data,
+	var totalWritten int
+	done := false
+	const portionSize int = 1024 * 1024
+	for !done {
+		data := make([]byte, portionSize)
+		readCnt, readErr := reader.Read(data)
+		unit := &pb.StoredUnit{
+			FileInfo: &pb.FileInfo{
+				FileId: fileId,
+			},
+			Data: data[:readCnt],
+		}
+		err := stream.Send(unit)
+		if err != nil {
+			stream.CloseSend()
+			return fmt.Errorf("stream send failed for %s: %w", fileId, err)
+		}
+		totalWritten += readCnt
+		if readErr == io.EOF || readCnt == 0 {
+			done = true
+		}
 	}
-	_, err = rs.client.StoreData(ctx, unit)
-	if err != nil {
-		return fmt.Errorf("remote store data failed: %w", err)
-	}
-	slog.Info("remote store done", "file_id", fileId, "err", err)
-	return nil
+	_, err = stream.CloseAndRecv()
+	slog.Info("chunk sent", "file_id", fileId, "written", totalWritten, "err", err)
+	return err
 }
 
 func (rs *remoteStorage) RetrieveChunk(ctx context.Context, fileId string, writer io.Writer) error {
 	info := &pb.FileInfo{
 		FileId: fileId,
 	}
-	unit, err := rs.client.RetrieveData(ctx, info)
+	stream, err := rs.client.RetrieveData(ctx, info)
 	if err != nil {
 		return fmt.Errorf("remote retrieve data failed: %w", err)
 	}
-	reader := bytes.NewReader(unit.GetData())
-	written, err := io.Copy(writer, reader)
-	slog.Info("remote retrieve done", "file_id", fileId, "written", written, "err", err)
-	return err
+	var totalWritten int
+	for {
+		unit, err := stream.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			stream.CloseSend()
+			return fmt.Errorf("stream receive failed for %s: %w", fileId, err)
+		}
+		written, err := writer.Write(unit.GetData())
+		if err != nil {
+			stream.CloseSend()
+			return fmt.Errorf("write portion failed for %s: %w", fileId, err)
+		}
+		totalWritten += written
+	}
+	slog.Info("remote retrieve done", "file_id", fileId, "written", totalWritten)
+	return stream.CloseSend()
 }
 
 func (rs *remoteStorage) DeleteChunk(ctx context.Context, fileId string) error {

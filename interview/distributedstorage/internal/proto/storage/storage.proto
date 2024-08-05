@@ -14,7 +14,7 @@ message StoredUnit {
 }
 
 service Storage {
-    rpc StoreData (StoredUnit) returns (google.protobuf.Empty) {};
-    rpc RetrieveData (FileInfo) returns (StoredUnit) {};
+    rpc StoreData (stream StoredUnit) returns (google.protobuf.Empty) {};
+    rpc RetrieveData (FileInfo) returns (stream StoredUnit) {};
     rpc DeleteData(FileInfo) returns (google.protobuf.Empty) {};
 }

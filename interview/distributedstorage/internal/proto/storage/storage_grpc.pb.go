@@ -29,8 +29,8 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type StorageClient interface {
-	StoreData(ctx context.Context, in *StoredUnit, opts ...grpc.CallOption) (*emptypb.Empty, error)
-	RetrieveData(ctx context.Context, in *FileInfo, opts ...grpc.CallOption) (*StoredUnit, error)
+	StoreData(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[StoredUnit, emptypb.Empty], error)
+	RetrieveData(ctx context.Context, in *FileInfo, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StoredUnit], error)
 	DeleteData(ctx context.Context, in *FileInfo, opts ...grpc.CallOption) (*emptypb.Empty, error)
 }
 
@@ -42,25 +42,37 @@ func NewStorageClient(cc grpc.ClientConnInterface) StorageClient {
 	return &storageClient{cc}
 }
 
-func (c *storageClient) StoreData(ctx context.Context, in *StoredUnit, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+func (c *storageClient) StoreData(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[StoredUnit, emptypb.Empty], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(emptypb.Empty)
-	err := c.cc.Invoke(ctx, Storage_StoreData_FullMethodName, in, out, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Storage_ServiceDesc.Streams[0], Storage_StoreData_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	return out, nil
+	x := &grpc.GenericClientStream[StoredUnit, emptypb.Empty]{ClientStream: stream}
+	return x, nil
 }
 
-func (c *storageClient) RetrieveData(ctx context.Context, in *FileInfo, opts ...grpc.CallOption) (*StoredUnit, error) {
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Storage_StoreDataClient = grpc.ClientStreamingClient[StoredUnit, emptypb.Empty]
+
+func (c *storageClient) RetrieveData(ctx context.Context, in *FileInfo, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StoredUnit], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(StoredUnit)
-	err := c.cc.Invoke(ctx, Storage_RetrieveData_FullMethodName, in, out, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Storage_ServiceDesc.Streams[1], Storage_RetrieveData_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	return out, nil
+	x := &grpc.GenericClientStream[FileInfo, StoredUnit]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
 }
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Storage_RetrieveDataClient = grpc.ServerStreamingClient[StoredUnit]
 
 func (c *storageClient) DeleteData(ctx context.Context, in *FileInfo, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
@@ -76,8 +88,8 @@ func (c *storageClient) DeleteData(ctx context.Context, in *FileInfo, opts ...gr
 // All implementations must embed UnimplementedStorageServer
 // for forward compatibility.
 type StorageServer interface {
-	StoreData(context.Context, *StoredUnit) (*emptypb.Empty, error)
-	RetrieveData(context.Context, *FileInfo) (*StoredUnit, error)
+	StoreData(grpc.ClientStreamingServer[StoredUnit, emptypb.Empty]) error
+	RetrieveData(*FileInfo, grpc.ServerStreamingServer[StoredUnit]) error
 	DeleteData(context.Context, *FileInfo) (*emptypb.Empty, error)
 	mustEmbedUnimplementedStorageServer()
 }
@@ -89,11 +101,11 @@ type StorageServer interface {
 // pointer dereference when methods are called.
 type UnimplementedStorageServer struct{}
 
-func (UnimplementedStorageServer) StoreData(context.Context, *StoredUnit) (*emptypb.Empty, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method StoreData not implemented")
+func (UnimplementedStorageServer) StoreData(grpc.ClientStreamingServer[StoredUnit, emptypb.Empty]) error {
+	return status.Errorf(codes.Unimplemented, "method StoreData not implemented")
 }
-func (UnimplementedStorageServer) RetrieveData(context.Context, *FileInfo) (*StoredUnit, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method RetrieveData not implemented")
+func (UnimplementedStorageServer) RetrieveData(*FileInfo, grpc.ServerStreamingServer[StoredUnit]) error {
+	return status.Errorf(codes.Unimplemented, "method RetrieveData not implemented")
 }
 func (UnimplementedStorageServer) DeleteData(context.Context, *FileInfo) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteData not implemented")
@@ -119,41 +131,23 @@ func RegisterStorageServer(s grpc.ServiceRegistrar, srv StorageServer) {
 	s.RegisterService(&Storage_ServiceDesc, srv)
 }
 
-func _Storage_StoreData_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(StoredUnit)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(StorageServer).StoreData(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Storage_StoreData_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(StorageServer).StoreData(ctx, req.(*StoredUnit))
-	}
-	return interceptor(ctx, in, info, handler)
+func _Storage_StoreData_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(StorageServer).StoreData(&grpc.GenericServerStream[StoredUnit, emptypb.Empty]{ServerStream: stream})
 }
 
-func _Storage_RetrieveData_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(FileInfo)
-	if err := dec(in); err != nil {
-		return nil, err
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Storage_StoreDataServer = grpc.ClientStreamingServer[StoredUnit, emptypb.Empty]
+
+func _Storage_RetrieveData_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(FileInfo)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
 	}
-	if interceptor == nil {
-		return srv.(StorageServer).RetrieveData(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Storage_RetrieveData_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(StorageServer).RetrieveData(ctx, req.(*FileInfo))
-	}
-	return interceptor(ctx, in, info, handler)
+	return srv.(StorageServer).RetrieveData(m, &grpc.GenericServerStream[FileInfo, StoredUnit]{ServerStream: stream})
 }
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Storage_RetrieveDataServer = grpc.ServerStreamingServer[StoredUnit]
 
 func _Storage_DeleteData_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(FileInfo)
@@ -181,18 +175,21 @@ var Storage_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*StorageServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "StoreData",
-			Handler:    _Storage_StoreData_Handler,
-		},
-		{
-			MethodName: "RetrieveData",
-			Handler:    _Storage_RetrieveData_Handler,
-		},
-		{
 			MethodName: "DeleteData",
 			Handler:    _Storage_DeleteData_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "StoreData",
+			Handler:       _Storage_StoreData_Handler,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "RetrieveData",
+			Handler:       _Storage_RetrieveData_Handler,
+			ServerStreams: true,
+		},
+	},
 	Metadata: "storage.proto",
 }

@@ -96,6 +96,7 @@ func (dd *DataDistributor) determineChunksReserveQuota(inputFilename string, siz
 }
 
 func (dd *DataDistributor) rollbackSave(ctx context.Context, inputFilename string, chunks []chunkmaster.Chunk, failedChunk int) {
+	slog.Warn("rollback", "filename", inputFilename, "failed_chunk", failedChunk)
 	dd.storageMutex.Lock()
 	for i, chunk := range chunks {
 		storage := dd.knownStorages[chunk.StorageInstance]
@@ -154,7 +155,7 @@ func (dd *DataDistributor) UpdateStorageInfo(_ context.Context, info *inventoryp
 		slog.Info("added new storage", "storage_id", storageID)
 	}
 	availBytesNow := meta.availableBytes
-	slog.Info("heartbeat received", "from", storageID, "available_bytes_received", info.GetAvailableBytes(), "available_bytes_known", availBytesNow)
+	slog.Debug("heartbeat received", "from", storageID, "available_bytes_received", info.GetAvailableBytes(), "available_bytes_known", availBytesNow)
 	// TODO: here we'll be getting a race condition when a chunk is being uploaded/removed, which can easily lead to overbooking of space.
 	// But it should self-recover! ..probably.
 	// Using our quotation calculation should be prevailing over what we have reported from host if we detect shortage
