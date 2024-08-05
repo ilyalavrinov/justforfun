@@ -4,29 +4,43 @@ An API-layer service receives REST with a file. Splits the data among X "storage
 
 The same service also can receive a request for getting this file back. Construct it and return.
 
-## Main ideas and assumptions
+## Testing instructions
 
-Chunk Master is the centerpiece of logic. It manages quotas and knows everything about the files.
+* start containers: run `docker compose -p diststorage up --build` in `docker/` directory
+* do `go run testapp.go` in `internal/cmd/testapp`. See that md5s match
 
-I think that in general here we want full control via sync communication and ensuring that data is stored on storage services. Communication via queues (and passing chunks via queues) is also an option, and I bet it can work well with proper choreography, but I think orchestration is better here. At least for a quick one-instance version.
+## Solution description
 
-This code assumes that all filenames are located in the same flat space, i.e. there is not separation by users, neigher logical nor physical. Auth and separation doesn't seem to be in scope. Also out of scope is duplicated upload handling.
+![architecture draft](./internal/doc/arch.png)
 
-## TODO now
+Single API service which accepts 2 REST API requests:
+1. `POST /{fileref}` to send data. `Content-Length` provides data size for chunk calculation, data itself is passed via a body
+2. `GET /{fileref}` to receive back stored data
 
-* Premature ending of sending by user - clean up the data
-* Storage down detection during uploading/downloading - clean up the data (recovery and faster detection in production version I'm not doing here)
-* (?) We don't actually need size or any equal splitting. We can split to chunks as we read the data, sending a new chunk to new storage and then changing storage by asking for a new chunk quota.
-* Race conditions on multiple Get/Post/combination
-* remoteStorage client - how to pass reader directly without using io.ReadAll?
+API service passes all requests to DataDistributor, which can DistributeData and ReconstructData. It employs ChunkMaster which stores information about chunk distribution and does this distribution. DataDistributor has a role of an orchestrator for a distributed chunk-saving transaction and is able to roll it back.
 
-## What I would do in an Ideal Super Final version
+DataDistributor is also an inventory manager for storage services. It receives heartbeats from storages and knows how to operate with them via RemoteStorage.
 
-* Auth is missing here. Of course we must have it, especially on read
-* Replication && recovery from failure
-* Better healthchecks and service discovery
-  - grpc.Conn close (now it's a app lifetime connection, but in case of heartbeat detections we should close connections)
-* Support for DELETE
-* Autoscaling (?)
-* Scalable external-facing API service with access via load balancer
-* If API services are scalable then I need more elaborate Chunk Master. No concrete thoughts how would I design it for now. Maybe it should be a standalone service. Maybe data still part of API service but with data replication between all of them
+Each Storage service stores and sends back stored data. Communication between DataDistributor and Storage services is done via gRPC - I wanted synchronous communication for this task, and chose gRPC because I haven't used it for a long time. Heartbeats are simple RPCs, while data passing uses streams.
+
+## Some thoughts
+
+* Design uses usual read/write mutexes. Depending on required architecture capabilities of a real product it might be not the best solution.
+* I have not performance tested it for simultaneous requests for upload/download/rollbacks. I suspect possible race conditions, especially when errors occur.
+* In general better testing and proper unit test coverage is needed
+
+## Missing capabilities from a full solution (out of scope of the original task)
+
+* API service is a singleton with single ChunkMaster.
+* No persistence
+  - ChunkMaster needs to store information about stored files somewhere
+  - StorageServices also do not have any separate volumes to save things
+* No auth. Single flat space of files is used now.
+* No replication && recovery from failure
+* No replacement of storage nodes (though it can support simple adding)
+
+
+# Notes to future me
+
+`protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative blabla.proto` for building proto files
+

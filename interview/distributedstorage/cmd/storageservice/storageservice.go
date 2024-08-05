@@ -174,7 +174,7 @@ func (ssrv *storageServer) DeleteData(ctx context.Context, in *storagepb.FileInf
 }
 
 func runHeartbeatSender(iam, storageDir, inventoryServerAddr string) {
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(1 * time.Second)
 	for {
 		<-ticker.C
 		conn, err := grpc.NewClient(inventoryServerAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
